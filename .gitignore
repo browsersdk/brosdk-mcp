@@ -1,0 +1,16 @@
+pinchtab
+agent-browser
+brosdk-mcp.exe
+*.go.[0-9]*
+brosdk-mcp
+*.log
+_stderr.txt
+_stdout.txt
+test_out.txt
+brosdk-mcp-low.exe
+run-brosdk-inspector.cmd
+libs/
+.workbuddy/
+dist/
+coverage.out
+*.test

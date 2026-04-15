@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "brosdk-mcp": {
+      "command": "brosdk-mcp",
+      "args": [
+        "--mode", "stdio",
+        "--cdp", "127.0.0.1:9222"
+      ]
+    }
+  }
+}
