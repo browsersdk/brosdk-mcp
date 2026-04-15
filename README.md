@@ -1,13 +1,13 @@
 # brosdk-mcp
 
-`brosdk-mcp` is a Go-based MCP server for browser automation. It connects to Chrome or Chromium through the Chrome DevTools Protocol (CDP) and exposes a practical browser toolset to AI agents over `stdio` or `SSE`.
+`brosdk-mcp` is a Go-based MCP server for browser automation. It can connect to Chrome or Chromium through the Chrome DevTools Protocol (CDP) at startup, or start without an initial browser and let agents attach environments later. It exposes a practical browser toolset to AI agents over `stdio` or `SSE`.
 
 The project focuses on reliable page interaction, ARIA-based snapshots, tab management, waits, screenshots, JavaScript evaluation, and multi-environment browser routing.
 
 ## Features
 
 - Supports `stdio` and `SSE` transport modes.
-- Connects to an existing Chrome/Chromium instance via `--remote-debugging-port`.
+- Can connect to an existing Chrome/Chromium instance via `--remote-debugging-port`.
 - Exposes 31 browser tools through MCP.
 - Provides ARIA snapshots with `ref` identifiers for follow-up `by_ref` actions.
 - Supports Shadow DOM traversal and frame-aware fallback for ref-based actions.
@@ -33,7 +33,7 @@ The canonical machine-readable registry is:
 ## Requirements
 
 - Go `1.25.1` or newer for local build
-- Chrome or Chromium started with remote debugging enabled
+- Chrome or Chromium with remote debugging enabled if you want an initial browser connection at startup
 
 Example:
 
@@ -75,10 +75,22 @@ make build-all
 brosdk-mcp --mode stdio --cdp 127.0.0.1:9222
 ```
 
+Or start without an initial browser:
+
+```bash
+brosdk-mcp --mode stdio
+```
+
 ### SSE
 
 ```bash
 brosdk-mcp --mode sse --cdp 127.0.0.1:9222 --port 8080
+```
+
+Or:
+
+```bash
+brosdk-mcp --mode sse --port 8080
 ```
 
 When running in `sse` mode, the server prints:
@@ -91,7 +103,8 @@ When running in `sse` mode, the server prints:
 | Flag | Description |
 | --- | --- |
 | `--mode` | `stdio` or `sse`, default `stdio` |
-| `--cdp` | Chrome CDP endpoint, such as `127.0.0.1:9222` or `ws://...` |
+| `--cdp` | Optional Chrome CDP endpoint, such as `127.0.0.1:9222` or `ws://...` |
+| `--name` | Default environment name used when `--cdp` is provided, default `default` |
 | `--port` | HTTP port for `sse` mode, `<=0` means auto assign |
 | `--log-file` | Optional log file path |
 | `--low-injection` | Prefer CDP-native actions and reduce JS-heavy fallbacks |
@@ -137,12 +150,13 @@ See [`examples/mcp/agent-sse.example.json`](examples/mcp/agent-sse.example.json)
 ## Recommended Usage Flow
 
 1. Start Chrome or Chromium with remote debugging enabled.
-2. Start `brosdk-mcp` in `stdio` or `sse` mode.
-3. Call `tools/list` to inspect the available tool set.
-4. Use `browser_navigate` to open the target page.
-5. Use `browser_aria_snapshot` to obtain a stable, accessibility-oriented snapshot with refs.
-6. Use `browser_click_by_ref`, `browser_type_by_ref`, or `browser_set_input_value_by_ref` for follow-up actions when possible.
-7. Use `browser_wait_for_*`, `browser_get_text`, `browser_screenshot`, and `browser_evaluate` to validate page state.
+2. Start `brosdk-mcp` in `stdio` or `sse` mode, with or without `--cdp`.
+3. If you started without `--cdp`, connect a browser later with `browser_add_environment` or `browser_use_environment`.
+4. Call `tools/list` to inspect the available tool set.
+5. Use `browser_navigate` to open the target page.
+6. Use `browser_aria_snapshot` to obtain a stable, accessibility-oriented snapshot with refs.
+7. Use `browser_click_by_ref`, `browser_type_by_ref`, or `browser_set_input_value_by_ref` for follow-up actions when possible.
+8. Use `browser_wait_for_*`, `browser_get_text`, `browser_screenshot`, and `browser_evaluate` to validate page state.
 
 ## ARIA Snapshot Notes
 
@@ -154,6 +168,8 @@ See [`examples/mcp/agent-sse.example.json`](examples/mcp/agent-sse.example.json)
 ## Multi-Environment Support
 
 `brosdk-mcp` can keep multiple browser environments and switch between them.
+
+If `--cdp` is omitted at startup, this is the main way to attach a browser later.
 
 Typical flow:
 
@@ -205,6 +221,7 @@ The release archives include:
 
 ### Cannot connect to Chrome
 
+- If you started without `--cdp`, this is expected until you add or select an environment.
 - Confirm Chrome was started with `--remote-debugging-port`.
 - Confirm `http://127.0.0.1:9222/json/version` is reachable.
 - Confirm the `--cdp` value points to the correct host and port.
@@ -223,4 +240,3 @@ The release archives include:
 
 - [PROTOCOL.md](PROTOCOL.md): transport, SSE session, and ARIA protocol details
 - [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md): agent/client integration examples
-

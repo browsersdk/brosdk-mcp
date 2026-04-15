@@ -14,3 +14,4 @@ libs/
 dist/
 coverage.out
 *.test
+PROJECT_SNAPSHOT.md

@@ -2,6 +2,12 @@
 
 本文件描述 `brosdk-mcp` 当前对外协议语义（stdio / SSE / session / ARIA），作为实现与文档的对齐参考。
 
+补充说明：
+
+- `--cdp` 在启动时是可选参数。
+- 提供 `--cdp` 时，服务会在启动阶段直接建立默认浏览器环境。
+- 不提供 `--cdp` 时，服务仍可正常启动，但初始没有浏览器连接；后续需通过 `browser_add_environment` 或 `browser_use_environment` 接入浏览器。
+
 ## 1. 传输模式
 
 - `stdio`：JSON-RPC 2.0 消息通过标准输入输出收发。
@@ -12,6 +18,7 @@
 - 交付环境优先使用预构建二进制或 release 包接入，而不是 `go run`。
 - `stdio` 模式推荐直接由 Agent 拉起二进制：
   - 例如 `brosdk-mcp --mode stdio --cdp 127.0.0.1:9222`
+  - 或 `brosdk-mcp --mode stdio`，后续再通过环境管理工具接入浏览器
 - `sse` 模式推荐先独立启动服务，再由 Agent 通过 `/sse` URL 接入。
 - 示例配置参考：
   - `examples/mcp/agent-stdio.example.json`：显式二进制路径
@@ -82,6 +89,7 @@ data: {"status":"connected","sessionId":"...","reused":false}
 
 ## 6. 健壮性策略（当前实现）
 
+- 允许“无初始浏览器”启动：服务可以在没有 `--cdp` 的情况下先启动，再由运行期工具补充浏览器环境。
 - CDP discovery（`/json/version`、`/json/list`）对瞬态错误做重试：
   1. 网络错误
   2. `429/502/503/504`

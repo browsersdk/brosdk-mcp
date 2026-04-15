@@ -23,8 +23,8 @@
 ## 2. 前置条件
 
 1. 已获取 `brosdk-mcp` 可执行文件
-2. 本机可启动 Chrome/Chromium，并开启远程调试端口
-3. 确认 Agent 运行环境可以访问该二进制与 CDP 端口
+2. 如果希望启动时直接接入浏览器，本机可启动 Chrome/Chromium，并开启远程调试端口
+3. 确认 Agent 运行环境可以访问该二进制；如果使用 `--cdp`，还需要可访问对应 CDP 端口
 
 Windows 示例：
 
@@ -71,6 +71,12 @@ go build -o ./brosdk-mcp.exe ./cmd/brosdk-mcp
 .\brosdk-mcp.exe --mode stdio --cdp 127.0.0.1:9222
 ```
 
+如果希望先启动 MCP、后续再动态连接浏览器，也可以：
+
+```powershell
+.\brosdk-mcp.exe --mode stdio
+```
+
 ### 4.2 `sse` 模式
 
 推荐给远程 Agent、需要复用服务、或多客户端场景。
@@ -78,6 +84,18 @@ go build -o ./brosdk-mcp.exe ./cmd/brosdk-mcp
 ```powershell
 .\brosdk-mcp.exe --mode sse --cdp 127.0.0.1:9222 --port 8080
 ```
+
+如果希望先启动服务、后续再动态连接浏览器，也可以：
+
+```powershell
+.\brosdk-mcp.exe --mode sse --port 8080
+```
+
+说明：
+
+- `--cdp` 允许为空。
+- 提供 `--cdp` 时，会在启动阶段直接建立默认浏览器环境。
+- 不提供 `--cdp` 时，服务会先起来，但初始没有浏览器连接；后续由 Agent 调用 `browser_add_environment` 或 `browser_use_environment` 即可。
 
 ## 5. Agent 自动接入配置模板
 
@@ -189,6 +207,13 @@ go build ./cmd/brosdk-mcp
 make build-all
 ```
 
+如果服务启动时没有传 `--cdp`，建议额外验证：
+
+1. `tools/list`
+2. `browser_add_environment`
+3. `browser_list_environments`
+4. 再继续执行 `browser_navigate` 与 `browser_aria_snapshot`
+
 ## 7. 常见问题
 
 1. Agent 无法启动 MCP
@@ -200,6 +225,8 @@ make build-all
    - 使用预构建二进制，不要使用 `go run`
 
 3. Chrome 连接失败
+   - 如果你本来就是“无 `--cdp` 启动”，那启动阶段没有浏览器连接是正常行为
+   - 这种情况下请让 Agent 后续调用 `browser_add_environment` 或 `browser_use_environment`
    - 确认 Chrome 已开启 `--remote-debugging-port=9222`
    - 检查 `--cdp` 参数与实际端口是否一致
 
@@ -212,4 +239,3 @@ make build-all
 
 - 协议语义：`PROTOCOL.md`
 - 主文档：`README.md`
-- 项目说明：`README.md`
