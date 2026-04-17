@@ -17,7 +17,7 @@ func TestInitializeEnvironmentStateWithoutBrowserClient(t *testing.T) {
 
 func TestWithEnvironmentRestoresActiveEnvironment(t *testing.T) {
 	e := &Executor{
-		browserClient:      nil,
+		browserClient:     nil,
 		cdpEndpoint:       "endpoint-a",
 		currentTabID:      "tab-a",
 		ariaRefStore:      map[string]map[string]ariaRefMeta{"tab-a": {"e1": {Role: "button"}}},
@@ -77,5 +77,25 @@ func TestCloseEnvironmentFallsBackToNextActive(t *testing.T) {
 	}
 	if e.activeEnvironmentName() != "beta" {
 		t.Fatalf("expected executor active environment beta, got %q", e.activeEnvironmentName())
+	}
+}
+
+func TestAllocateEnvironmentNameLocked(t *testing.T) {
+	e := &Executor{
+		environments: map[string]*browserEnvironment{
+			"local":   newBrowserEnvironment("local", "", nil, false),
+			"local-1": newBrowserEnvironment("local-1", "", nil, false),
+			"work":    newBrowserEnvironment("work", "", nil, false),
+		},
+	}
+
+	if got := e.allocateEnvironmentNameLocked("local"); got != "local-2" {
+		t.Fatalf("expected local-2, got %q", got)
+	}
+	if got := e.allocateEnvironmentNameLocked(""); got != "local-2" {
+		t.Fatalf("expected default prefix to allocate local-2, got %q", got)
+	}
+	if got := e.allocateEnvironmentNameLocked("sandbox"); got != "sandbox" {
+		t.Fatalf("expected sandbox, got %q", got)
 	}
 }

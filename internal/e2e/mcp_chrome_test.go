@@ -425,13 +425,13 @@ func TestE2EMultiEnvironmentWorkflowStdio(t *testing.T) {
 		_, _ = mcpCmd.Process.Wait()
 	}()
 
-	addEnvResult := sendToolsCall(t, stdin, reader, 9001, "browser_add_environment", map[string]any{
+	addEnvResult := sendToolsCall(t, stdin, reader, 9001, "browser_connect_environment", map[string]any{
 		"name":         "second",
 		"cdp_endpoint": fmt.Sprintf("127.0.0.1:%d", debugPortB),
 		"set_active":   false,
 	})
 	if okValue, ok := addEnvResult["ok"].(bool); !ok || !okValue {
-		t.Fatalf("browser_add_environment unexpected result: %#v", addEnvResult)
+		t.Fatalf("browser_connect_environment unexpected result: %#v", addEnvResult)
 	}
 
 	listResult := sendToolsCall(t, stdin, reader, 9002, "browser_list_environments", map[string]any{})
@@ -464,9 +464,9 @@ func TestE2EMultiEnvironmentWorkflowStdio(t *testing.T) {
 		t.Fatalf("second environment text mismatch: %#v", textB)
 	}
 
-	useEnvResult := sendToolsCall(t, stdin, reader, 9007, "browser_use_environment", map[string]any{"name": "second"})
+	useEnvResult := sendToolsCall(t, stdin, reader, 9007, "browser_switch_environment", map[string]any{"name": "second"})
 	if okValue, ok := useEnvResult["ok"].(bool); !ok || !okValue {
-		t.Fatalf("browser_use_environment unexpected result: %#v", useEnvResult)
+		t.Fatalf("browser_switch_environment unexpected result: %#v", useEnvResult)
 	}
 
 	listAfterUse := sendToolsCall(t, stdin, reader, 9008, "browser_list_environments", map[string]any{})
@@ -557,16 +557,16 @@ func TestE2EMultiEnvironmentWorkflowSSE(t *testing.T) {
 		_, _ = mcpCmd.Process.Wait()
 	}()
 
-	addEnvResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9101, "browser_add_environment", map[string]any{
+	addEnvResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9101, "browser_connect_environment", map[string]any{
 		"name":         "second",
 		"cdp_endpoint": fmt.Sprintf("127.0.0.1:%d", debugPortB),
 		"set_active":   false,
 	})
 	if err != nil {
-		t.Fatalf("browser_add_environment via sse failed: %v; mcp stderr=%s", err, mcpStderr.String())
+		t.Fatalf("browser_connect_environment via sse failed: %v; mcp stderr=%s", err, mcpStderr.String())
 	}
 	if okValue, ok := addEnvResult["ok"].(bool); !ok || !okValue {
-		t.Fatalf("browser_add_environment unexpected result: %#v", addEnvResult)
+		t.Fatalf("browser_connect_environment unexpected result: %#v", addEnvResult)
 	}
 
 	listResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9102, "browser_list_environments", map[string]any{})
@@ -612,12 +612,12 @@ func TestE2EMultiEnvironmentWorkflowSSE(t *testing.T) {
 		t.Fatalf("second environment text mismatch: %#v", textB)
 	}
 
-	useEnvResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9107, "browser_use_environment", map[string]any{"name": "second"})
+	useEnvResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9107, "browser_switch_environment", map[string]any{"name": "second"})
 	if err != nil {
-		t.Fatalf("browser_use_environment via sse failed: %v; mcp stderr=%s", err, mcpStderr.String())
+		t.Fatalf("browser_switch_environment via sse failed: %v; mcp stderr=%s", err, mcpStderr.String())
 	}
 	if okValue, ok := useEnvResult["ok"].(bool); !ok || !okValue {
-		t.Fatalf("browser_use_environment unexpected result: %#v", useEnvResult)
+		t.Fatalf("browser_switch_environment unexpected result: %#v", useEnvResult)
 	}
 
 	listAfterUse, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9108, "browser_list_environments", map[string]any{})
@@ -647,6 +647,83 @@ func TestE2EMultiEnvironmentWorkflowSSE(t *testing.T) {
 	}
 	if text, _ := textAfterClose["text"].(string); !strings.Contains(text, "Environment A Marker") {
 		t.Fatalf("active environment after close mismatch: %#v", textAfterClose)
+	}
+}
+
+func TestE2ELaunchLocalEnvironmentStdio(t *testing.T) {
+	if os.Getenv("BROSDK_E2E") != "1" {
+		t.Skip("set BROSDK_E2E=1 to run e2e test")
+	}
+
+	chromePath, ok := findChromeExecutable()
+	if !ok {
+		t.Skip("chrome executable not found")
+	}
+
+	fixtureURL, shutdownFixture := startInteractionFixtureServer(t)
+	defer shutdownFixture()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	var mcpStderr bytes.Buffer
+	mcpCmd := exec.CommandContext(
+		ctx,
+		"go", "run", "./cmd/brosdk-mcp",
+		"--mode", "stdio",
+		"--schema", "schemas/browser-tools.schema.json",
+	)
+	mcpCmd.Dir = repoRootFromTest(t)
+	mcpCmd.Stderr = &mcpStderr
+
+	stdin, err := mcpCmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("get mcp stdin pipe failed: %v", err)
+	}
+	stdout, err := mcpCmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("get mcp stdout pipe failed: %v", err)
+	}
+	reader := bufio.NewReader(stdout)
+
+	if err := mcpCmd.Start(); err != nil {
+		t.Fatalf("start mcp failed: %v", err)
+	}
+	defer func() {
+		_ = mcpCmd.Process.Kill()
+		_, _ = mcpCmd.Process.Wait()
+	}()
+
+	launchResult := sendToolsCall(t, stdin, reader, 9501, "browser_launch_environment", map[string]any{
+		"executable_path": chromePath,
+		"initial_url":     fixtureURL,
+		"headless":        true,
+	})
+	if okValue, ok := launchResult["ok"].(bool); !ok || !okValue {
+		t.Fatalf("browser_launch_environment unexpected result: %#v", launchResult)
+	}
+	if name, _ := launchResult["name"].(string); !strings.HasPrefix(name, "local") {
+		t.Fatalf("expected auto-assigned local environment name, got %#v", launchResult)
+	}
+	if active, _ := launchResult["active"].(bool); !active {
+		t.Fatalf("expected launched environment to be active, got %#v", launchResult)
+	}
+
+	waitSelectorResult := sendToolsCall(t, stdin, reader, 9502, "browser_wait_for_selector", map[string]any{
+		"selector":  "#nameInput",
+		"state":     "visible",
+		"timeoutMs": 30000,
+	})
+	if okValue, ok := waitSelectorResult["ok"].(bool); !ok || !okValue {
+		t.Fatalf("browser_wait_for_selector unexpected result: %#v", waitSelectorResult)
+	}
+
+	getTextResult := sendToolsCall(t, stdin, reader, 9503, "browser_get_text", map[string]any{
+		"maxChars": 1000,
+	})
+	pageText, ok := getTextResult["text"].(string)
+	if !ok || !strings.Contains(pageText, "Interaction Fixture") {
+		t.Fatalf("browser_get_text returned unexpected text: %#v", getTextResult)
 	}
 }
 

@@ -95,7 +95,7 @@ go build -o ./brosdk-mcp.exe ./cmd/brosdk-mcp
 
 - `--cdp` 允许为空。
 - 提供 `--cdp` 时，会在启动阶段直接建立默认浏览器环境。
-- 不提供 `--cdp` 时，服务会先起来，但初始没有浏览器连接；后续由 Agent 调用 `browser_add_environment` 或 `browser_use_environment` 即可。
+- 不提供 `--cdp` 时，服务会先起来，但初始没有浏览器连接；后续由 Agent 调用 `browser_connect_environment` 或 `browser_switch_environment` 即可。
 
 ## 5. Agent 自动接入配置模板
 
@@ -210,7 +210,7 @@ make build-all
 如果服务启动时没有传 `--cdp`，建议额外验证：
 
 1. `tools/list`
-2. `browser_add_environment`
+2. `browser_connect_environment`
 3. `browser_list_environments`
 4. 再继续执行 `browser_navigate` 与 `browser_aria_snapshot`
 
@@ -226,7 +226,7 @@ make build-all
 
 3. Chrome 连接失败
    - 如果你本来就是“无 `--cdp` 启动”，那启动阶段没有浏览器连接是正常行为
-   - 这种情况下请让 Agent 后续调用 `browser_add_environment` 或 `browser_use_environment`
+   - 这种情况下请让 Agent 后续调用 `browser_connect_environment` 或 `browser_switch_environment`
    - 确认 Chrome 已开启 `--remote-debugging-port=9222`
    - 检查 `--cdp` 参数与实际端口是否一致
 

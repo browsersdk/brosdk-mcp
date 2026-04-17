@@ -55,7 +55,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger, buildVersi
 			"protocolVersion", version.ProtocolVersion,
 		)
 	} else {
-		logger.Info("Starting without initial Chrome connection; add an environment via browser_add_environment or browser_use_environment")
+		logger.Info("Starting without initial Chrome connection; add an environment via browser_connect_environment or browser_switch_environment")
 	}
 
 	executor, err := tools.NewExecutor(ctx, cdpClient, cfg.CDPEndpoint, cfg.EnvironmentName, logger, cfg.LowInjection)

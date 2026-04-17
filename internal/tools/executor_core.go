@@ -84,11 +84,13 @@ func (e *Executor) Close() error {
 
 func (e *Executor) Call(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	switch name {
-	case "browser_add_environment":
+	case "browser_connect_environment":
 		return e.callAddEnvironment(ctx, args)
+	case "browser_launch_environment":
+		return e.callLaunchLocalEnvironment(ctx, args)
 	case "browser_list_environments":
 		return e.callListEnvironments(ctx, args)
-	case "browser_use_environment":
+	case "browser_switch_environment":
 		return e.callUseEnvironment(ctx, args)
 	case "browser_close_environment":
 		return e.callCloseEnvironment(ctx, args)

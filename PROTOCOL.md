@@ -6,7 +6,7 @@
 
 - `--cdp` 在启动时是可选参数。
 - 提供 `--cdp` 时，服务会在启动阶段直接建立默认浏览器环境。
-- 不提供 `--cdp` 时，服务仍可正常启动，但初始没有浏览器连接；后续需通过 `browser_add_environment` 或 `browser_use_environment` 接入浏览器。
+- 不提供 `--cdp` 时，服务仍可正常启动，但初始没有浏览器连接；后续需通过 `browser_connect_environment` 或 `browser_switch_environment` 接入浏览器。
 
 ## 1. 传输模式
 

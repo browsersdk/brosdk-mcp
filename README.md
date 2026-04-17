@@ -8,7 +8,7 @@ The project focuses on reliable page interaction, ARIA-based snapshots, tab mana
 
 - Supports `stdio` and `SSE` transport modes.
 - Can connect to an existing Chrome/Chromium instance via `--remote-debugging-port`.
-- Exposes 31 browser tools through MCP.
+- Exposes 32 browser tools through MCP.
 - Provides ARIA snapshots with `ref` identifiers for follow-up `by_ref` actions.
 - Supports Shadow DOM traversal and frame-aware fallback for ref-based actions.
 - Supports multiple browser environments in one MCP server process.
@@ -23,7 +23,7 @@ Current tools:
 - Interaction: `browser_click`, `browser_click_by_ref`, `browser_type`, `browser_type_by_ref`, `browser_set_input_value`, `browser_set_input_value_by_ref`, `browser_find_and_click_text`, `browser_press`, `browser_scroll`
 - Waiting: `browser_wait`, `browser_wait_for_selector`, `browser_wait_for_text`, `browser_wait_for_load`, `browser_wait_for_url`, `browser_wait_for_function`
 - Tabs: `browser_list_tabs`, `browser_new_tab`, `browser_switch_tab`, `browser_close_tab`
-- Environments: `browser_add_environment`, `browser_list_environments`, `browser_use_environment`, `browser_close_environment`
+- Environments: `browser_connect_environment`, `browser_launch_environment`, `browser_list_environments`, `browser_switch_environment`, `browser_close_environment`
 
 The canonical machine-readable registry is:
 
@@ -151,7 +151,7 @@ See [`examples/mcp/agent-sse.example.json`](examples/mcp/agent-sse.example.json)
 
 1. Start Chrome or Chromium with remote debugging enabled.
 2. Start `brosdk-mcp` in `stdio` or `sse` mode, with or without `--cdp`.
-3. If you started without `--cdp`, connect a browser later with `browser_add_environment` or `browser_use_environment`.
+3. If you started without `--cdp`, connect a browser later with `browser_connect_environment` or `browser_switch_environment`.
 4. Call `tools/list` to inspect the available tool set.
 5. Use `browser_navigate` to open the target page.
 6. Use `browser_aria_snapshot` to obtain a stable, accessibility-oriented snapshot with refs.
@@ -173,10 +173,13 @@ If `--cdp` is omitted at startup, this is the main way to attach a browser later
 
 Typical flow:
 
-1. `browser_add_environment`
-2. `browser_list_environments`
-3. `browser_use_environment`
-4. Call regular browser tools with the active environment, or pass `environment` on supported calls for one-off targeting
+1. `browser_connect_environment`
+2. `browser_launch_environment`
+3. `browser_list_environments`
+4. `browser_switch_environment`
+5. Call regular browser tools with the active environment, or pass `environment` on supported calls for one-off targeting
+
+`browser_launch_environment` can launch a local Chrome/Chromium process for you. If `name` is omitted, brosdk-mcp will assign one automatically such as `local`, `local-1`, or `local-2`.
 
 ## Development
 

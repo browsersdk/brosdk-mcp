@@ -2,7 +2,7 @@
     "$schema":  "https://json-schema.org/draft/2020-12/schema",
     "title":  "brosdk browser tools registry",
     "version":  "0.1.3",
-    "toolCount":  31,
+    "toolCount":  32,
     "tools":  [
                   {
                       "name":  "browser_navigate",
@@ -952,9 +952,9 @@
                                        }
                   },
                   {
-                      "name":  "browser_add_environment",
+                      "name":  "browser_connect_environment",
                       "category":  "environment",
-                      "description":  "Add a running Chrome instance as a named environment.",
+                      "description":  "Connect a running Chrome instance as a named environment.",
                       "inputSchema":  {
                                           "type":  "object",
                                           "properties":  {
@@ -984,6 +984,43 @@
                                        }
                   },
                   {
+                      "name":  "browser_launch_environment",
+                      "category":  "environment",
+                      "description":  "Launch a local Chrome or Chromium instance and register it as an MCP environment.",
+                      "inputSchema":  {
+                                          "type":  "object",
+                                          "properties":  {
+                                                             "name":  {
+                                                                          "type":  "string",
+                                                                          "description":  "Optional environment name. When omitted, a unique local-* name is assigned automatically."
+                                                                      },
+                                                             "executable_path":  {
+                                                                                     "type":  "string",
+                                                                                     "description":  "Optional browser executable path. When omitted, brosdk-mcp will try common Chrome/Chromium locations."
+                                                                                 },
+                                                             "initial_url":  {
+                                                                                 "type":  "string",
+                                                                                 "description":  "Optional startup URL. Defaults to about:blank."
+                                                                             },
+                                                             "headless":  {
+                                                                              "type":  "boolean",
+                                                                              "default":  true,
+                                                                              "description":  "Whether to launch the browser in headless mode."
+                                                                          },
+                                                             "set_active":  {
+                                                                                "type":  "boolean",
+                                                                                "default":  true,
+                                                                                "description":  "Whether to activate the environment immediately."
+                                                                            }
+                                                         },
+                                          "additionalProperties":  false
+                                      },
+                      "outputSchema":  {
+                                           "type":  "object",
+                                           "additionalProperties":  true
+                                       }
+                  },
+                  {
                       "name":  "browser_list_environments",
                       "category":  "environment",
                       "description":  "List available browser environments and their connection state.",
@@ -1000,9 +1037,9 @@
                                        }
                   },
                   {
-                      "name":  "browser_use_environment",
+                      "name":  "browser_switch_environment",
                       "category":  "environment",
-                      "description":  "Switch to an existing environment, or create it when cdp_endpoint is provided.",
+                      "description":  "Switch to an existing environment, or connect it when cdp_endpoint is provided.",
                       "inputSchema":  {
                                           "type":  "object",
                                           "properties":  {
