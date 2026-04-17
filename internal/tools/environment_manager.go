@@ -25,9 +25,8 @@ type browserEnvironment struct {
 	BrowserProcess *exec.Cmd
 	UserDataDir    string
 
-	CurrentTabID string
-	PageClient   *cdp.Client
-	AriaRefStore map[string]map[string]ariaRefMeta
+	Pages        map[string]*pageRuntime
+	ActivePageID string
 	Connected    bool
 }
 
@@ -37,7 +36,7 @@ func newBrowserEnvironment(name string, cdpEndpoint string, browserClient *cdp.C
 		CDPEndpoint:   strings.TrimSpace(cdpEndpoint),
 		BrowserClient: browserClient,
 		OwnsBrowser:   ownsBrowser,
-		AriaRefStore:  make(map[string]map[string]ariaRefMeta),
+		Pages:         make(map[string]*pageRuntime),
 		Connected:     browserClient != nil,
 	}
 }
@@ -53,9 +52,10 @@ func (e *Executor) initializeEnvironmentState(defaultName string) {
 		return
 	}
 	env := newBrowserEnvironment(defaultName, e.cdpEndpoint, e.browserClient, false)
-	env.CurrentTabID = e.currentTabID
-	env.PageClient = e.pageClient
-	env.AriaRefStore = cloneAriaRefStore(e.ariaRefStore)
+	if strings.TrimSpace(e.currentTabID) != "" {
+		env.Pages[e.currentTabID] = newPageRuntime(e.currentTabID, e.pageClient, cloneAriaRefStoreForTab(e.ariaRefStore, e.currentTabID))
+		env.ActivePageID = e.currentTabID
+	}
 	env.Connected = e.browserClient != nil
 	e.environments[defaultName] = env
 	e.activeEnvironment = defaultName
@@ -86,9 +86,29 @@ func (e *Executor) snapshotActiveEnvironmentLocked() {
 	}
 	env.BrowserClient = e.browserClient
 	env.CDPEndpoint = e.cdpEndpoint
-	env.CurrentTabID = e.currentTabID
-	env.PageClient = e.pageClient
-	env.AriaRefStore = cloneAriaRefStore(e.ariaRefStore)
+	if env.Pages == nil {
+		env.Pages = make(map[string]*pageRuntime)
+	}
+	for tabID, refs := range e.ariaRefStore {
+		page := env.Pages[tabID]
+		if page == nil {
+			page = newPageRuntime(tabID, nil, refs)
+			env.Pages[tabID] = page
+			continue
+		}
+		page.AriaRefStore = cloneAriaRefMetaMap(refs)
+	}
+	if strings.TrimSpace(e.currentTabID) != "" {
+		page := env.Pages[e.currentTabID]
+		if page == nil {
+			page = newPageRuntime(e.currentTabID, e.pageClient, cloneAriaRefStoreForTab(e.ariaRefStore, e.currentTabID))
+			env.Pages[e.currentTabID] = page
+		} else {
+			page.PageClient = e.pageClient
+			page.AriaRefStore = cloneAriaRefStoreForTab(e.ariaRefStore, e.currentTabID)
+		}
+		env.ActivePageID = e.currentTabID
+	}
 	env.Connected = e.browserClient != nil
 }
 
@@ -102,9 +122,13 @@ func (e *Executor) loadEnvironmentLocked(name string) error {
 	}
 	e.browserClient = env.BrowserClient
 	e.cdpEndpoint = env.CDPEndpoint
-	e.currentTabID = env.CurrentTabID
-	e.pageClient = env.PageClient
-	e.ariaRefStore = cloneAriaRefStore(env.AriaRefStore)
+	e.currentTabID = ""
+	e.pageClient = nil
+	if page := env.Pages[strings.TrimSpace(env.ActivePageID)]; page != nil {
+		e.currentTabID = page.TabID
+		e.pageClient = page.PageClient
+	}
+	e.ariaRefStore = exportPageRuntimesToAriaRefStore(env.Pages)
 	e.activeEnvironment = env.Name
 	return nil
 }
@@ -209,14 +233,23 @@ func (e *Executor) connectBrowserEnvironment(ctx context.Context, env *browserEn
 		_ = pageClient.Close()
 		return err
 	}
-	if env.PageClient != nil {
-		_ = env.PageClient.Close()
+	if env.Pages == nil {
+		env.Pages = make(map[string]*pageRuntime)
 	}
-	env.PageClient = pageClient
-	env.CurrentTabID = tabID
+	page := env.Pages[tabID]
+	if page == nil {
+		page = newPageRuntime(tabID, nil, nil)
+		env.Pages[tabID] = page
+	}
+	if page.PageClient != nil {
+		_ = page.PageClient.Close()
+	}
+	page.PageClient = pageClient
+	page.TabID = tabID
+	env.ActivePageID = tabID
 	env.Connected = true
-	if env.AriaRefStore == nil {
-		env.AriaRefStore = make(map[string]map[string]ariaRefMeta)
+	if page.AriaRefStore == nil {
+		page.AriaRefStore = make(map[string]ariaRefMeta)
 	}
 	return nil
 }
@@ -304,9 +337,12 @@ func closeManagedBrowserProcess(env *browserEnvironment) {
 	if env == nil {
 		return
 	}
-	if env.PageClient != nil {
-		_ = env.PageClient.Close()
-		env.PageClient = nil
+	for _, page := range env.Pages {
+		if page == nil || page.PageClient == nil {
+			continue
+		}
+		_ = page.PageClient.Close()
+		page.PageClient = nil
 	}
 	if env.OwnsBrowser && env.BrowserClient != nil {
 		_ = env.BrowserClient.Close()

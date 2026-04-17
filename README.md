@@ -8,7 +8,7 @@ The project focuses on reliable page interaction, ARIA-based snapshots, tab mana
 
 - Supports `stdio` and `SSE` transport modes.
 - Can connect to an existing Chrome/Chromium instance via `--remote-debugging-port`.
-- Exposes 32 browser tools through MCP.
+- Exposes 36 browser tools through MCP.
 - Provides ARIA snapshots with `ref` identifiers for follow-up `by_ref` actions.
 - Supports Shadow DOM traversal and frame-aware fallback for ref-based actions.
 - Supports multiple browser environments in one MCP server process.
@@ -18,6 +18,7 @@ The project focuses on reliable page interaction, ARIA-based snapshots, tab mana
 
 Current tools:
 
+- Agents: `browser_create_page_agent`, `browser_list_page_agents`, `browser_get_page_agent`, `browser_remove_page_agent`
 - Navigation: `browser_navigate`, `browser_reload`, `browser_go_back`, `browser_go_forward`
 - Inspection: `browser_aria_snapshot`, `browser_screenshot`, `browser_get_text`, `browser_evaluate`
 - Interaction: `browser_click`, `browser_click_by_ref`, `browser_type`, `browser_type_by_ref`, `browser_set_input_value`, `browser_set_input_value_by_ref`, `browser_find_and_click_text`, `browser_press`, `browser_scroll`
@@ -97,6 +98,23 @@ When running in `sse` mode, the server prints:
 
 - SSE endpoint: `http://127.0.0.1:8080/sse`
 - message endpoint: `http://127.0.0.1:8080/message`
+- UI endpoint: `http://127.0.0.1:8080/ui`
+
+### Built-in UI
+
+When running in `sse` mode, brosdk-mcp also serves a local testing UI at `/ui`.
+
+The first version is intended for PageAgent and tool testing:
+
+- launch or inspect environments
+- create, list, inspect, and remove page agents
+- run arbitrary MCP tools without manually writing JSON-RPC requests
+
+Open it in your browser after startup:
+
+```text
+http://127.0.0.1:8080/ui
+```
 
 ## CLI Flags
 
@@ -209,8 +227,8 @@ Planned MCP surface for the first PageAgent iteration:
 - `browser_create_page_agent`
 - `browser_list_page_agents`
 - `browser_get_page_agent`
-- `browser_run_page_agent_step`
 - `browser_remove_page_agent`
+- `browser_run_page_agent_step` (planned next)
 
 Implementation plan:
 
@@ -218,6 +236,12 @@ Implementation plan:
 2. Migrate tab and page state out of the global executor into page-scoped runtime structures
 3. Add PageAgent registry and state model
 4. Add step-based PageAgent execution before attempting autonomous loops
+
+Current status:
+
+- Internal page runtime refactor has started
+- First PageAgent registry tools are available
+- Autonomous loops are not implemented yet
 
 The current recommendation is to keep `PageAgent` as an AI-agent concept while continuing to expose browser-native concepts like `tab` and `page` in the public MCP API where possible.
 

@@ -83,6 +83,14 @@ func (e *Executor) callCloseTab(ctx context.Context, args map[string]any) (map[s
 		return nil, fmt.Errorf("Target.closeTarget failed: %w", err)
 	}
 	e.clearStoredAriaRefMeta(targetID)
+	e.mu.Lock()
+	if env := e.environments[e.activeEnvironment]; env != nil {
+		delete(env.Pages, targetID)
+		if env.ActivePageID == targetID {
+			env.ActivePageID = ""
+		}
+	}
+	e.mu.Unlock()
 
 	remaining, err := e.listPageTargets(ctx)
 	if err != nil {
@@ -154,10 +162,23 @@ func (e *Executor) connectToTab(ctx context.Context, targetID string) error {
 	}
 
 	var old *cdp.Client
+	var oldTabID string
 	e.mu.Lock()
 	old = e.pageClient
+	oldTabID = e.currentTabID
+	e.syncExecutorStateToCurrentPageLocked()
 	e.pageClient = newPageClient
 	e.currentTabID = targetID
+	if strings.TrimSpace(oldTabID) != "" {
+		if oldPage := e.ensurePageRuntimeLocked(oldTabID); oldPage != nil {
+			oldPage.PageClient = nil
+			oldPage.AriaRefStore = cloneAriaRefStoreForTab(e.ariaRefStore, oldTabID)
+		}
+	}
+	if page := e.ensurePageRuntimeLocked(targetID); page != nil {
+		page.PageClient = newPageClient
+		page.TabID = targetID
+	}
 	e.mu.Unlock()
 
 	if old != nil {
@@ -207,5 +228,6 @@ func (e *Executor) getCurrentPageClient(ctx context.Context) (*cdp.Client, strin
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.syncExecutorStateToCurrentPageLocked()
 	return e.pageClient, e.currentTabID, nil
 }

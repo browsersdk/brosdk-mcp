@@ -23,6 +23,9 @@ func (e *Executor) storeAriaRefMeta(tabID string, meta map[string]map[string]any
 		e.ariaRefStore = make(map[string]map[string]ariaRefMeta)
 	}
 	e.ariaRefStore[tabID] = converted
+	if page := e.ensurePageRuntimeLocked(tabID); page != nil {
+		page.AriaRefStore = cloneAriaRefMetaMap(converted)
+	}
 }
 
 func (e *Executor) getStoredAriaRefMeta(tabID string, ref string) (*ariaRefMeta, bool) {
@@ -55,6 +58,9 @@ func (e *Executor) clearStoredAriaRefMeta(tabID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.ariaRefStore, tabID)
+	if page := e.ensurePageRuntimeLocked(tabID); page != nil {
+		page.AriaRefStore = make(map[string]ariaRefMeta)
+	}
 }
 
 func parseAriaRefMeta(raw map[string]any) ariaRefMeta {

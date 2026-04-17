@@ -22,6 +22,9 @@ type Executor struct {
 	pageClient   *cdp.Client
 	ariaRefStore map[string]map[string]ariaRefMeta
 
+	pageAgents      map[string]*pageAgent
+	nextPageAgentID int
+
 	environments      map[string]*browserEnvironment
 	activeEnvironment string
 
@@ -37,6 +40,7 @@ func NewExecutor(ctx context.Context, browserClient *cdp.Client, cdpEndpoint str
 		logger:        logger,
 		lowInjection:  lowInjection,
 		ariaRefStore:  make(map[string]map[string]ariaRefMeta),
+		pageAgents:    make(map[string]*pageAgent),
 	}
 
 	if browserClient != nil {
@@ -70,9 +74,12 @@ func (e *Executor) Close() error {
 		if env == nil {
 			continue
 		}
-		if env.PageClient != nil {
-			_ = env.PageClient.Close()
-			env.PageClient = nil
+		for _, page := range env.Pages {
+			if page == nil || page.PageClient == nil {
+				continue
+			}
+			_ = page.PageClient.Close()
+			page.PageClient = nil
 		}
 		if env.OwnsBrowser && env.BrowserClient != nil {
 			_ = env.BrowserClient.Close()
@@ -84,6 +91,14 @@ func (e *Executor) Close() error {
 
 func (e *Executor) Call(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	switch name {
+	case "browser_create_page_agent":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callCreatePageAgent(ctx, args) })
+	case "browser_list_page_agents":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callListPageAgents(ctx, args) })
+	case "browser_get_page_agent":
+		return e.callGetPageAgent(ctx, args)
+	case "browser_remove_page_agent":
+		return e.callRemovePageAgent(ctx, args)
 	case "browser_connect_environment":
 		return e.callAddEnvironment(ctx, args)
 	case "browser_launch_environment":

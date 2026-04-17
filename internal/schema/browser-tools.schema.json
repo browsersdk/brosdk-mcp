@@ -2,8 +2,105 @@
     "$schema":  "https://json-schema.org/draft/2020-12/schema",
     "title":  "brosdk browser tools registry",
     "version":  "0.1.3",
-    "toolCount":  32,
+    "toolCount":  36,
     "tools":  [
+                  {
+                      "name":  "browser_create_page_agent",
+                      "category":  "agent",
+                      "description":  "Create a page-scoped AI agent bound to the active or specified tab.",
+                      "inputSchema":  {
+                                          "type":  "object",
+                                          "properties":  {
+                                                             "goal":  {
+                                                                          "type":  "string",
+                                                                          "description":  "The goal this page agent should work toward."
+                                                                      },
+                                                             "name":  {
+                                                                          "type":  "string",
+                                                                          "description":  "Optional label for the page agent."
+                                                                      },
+                                                             "tabId":  {
+                                                                           "type":  "string",
+                                                                           "description":  "Optional tab to bind before creating the page agent."
+                                                                       },
+                                                             "environment":  {
+                                                                                 "type":  "string",
+                                                                                 "description":  "Optional environment override for this call."
+                                                                             }
+                                                         },
+                                          "required":  [
+                                                           "goal"
+                                                       ],
+                                          "additionalProperties":  false
+                                      },
+                      "outputSchema":  {
+                                           "type":  "object",
+                                           "additionalProperties":  true
+                                       }
+                  },
+                  {
+                      "name":  "browser_list_page_agents",
+                      "category":  "agent",
+                      "description":  "List page-scoped AI agents.",
+                      "inputSchema":  {
+                                          "type":  "object",
+                                          "properties":  {
+                                                             "environment":  {
+                                                                                 "type":  "string",
+                                                                                 "description":  "Optional environment filter."
+                                                                             }
+                                                         },
+                                          "additionalProperties":  false
+                                      },
+                      "outputSchema":  {
+                                           "type":  "object",
+                                           "additionalProperties":  true
+                                       }
+                  },
+                  {
+                      "name":  "browser_get_page_agent",
+                      "category":  "agent",
+                      "description":  "Get one page-scoped AI agent by id.",
+                      "inputSchema":  {
+                                          "type":  "object",
+                                          "properties":  {
+                                                             "agentId":  {
+                                                                             "type":  "string",
+                                                                             "description":  "Page agent id."
+                                                                         }
+                                                         },
+                                          "required":  [
+                                                           "agentId"
+                                                       ],
+                                          "additionalProperties":  false
+                                      },
+                      "outputSchema":  {
+                                           "type":  "object",
+                                           "additionalProperties":  true
+                                       }
+                  },
+                  {
+                      "name":  "browser_remove_page_agent",
+                      "category":  "agent",
+                      "description":  "Remove one page-scoped AI agent by id.",
+                      "inputSchema":  {
+                                          "type":  "object",
+                                          "properties":  {
+                                                             "agentId":  {
+                                                                             "type":  "string",
+                                                                             "description":  "Page agent id."
+                                                                         }
+                                                         },
+                                          "required":  [
+                                                           "agentId"
+                                                       ],
+                                          "additionalProperties":  false
+                                      },
+                      "outputSchema":  {
+                                           "type":  "object",
+                                           "additionalProperties":  true
+                                       }
+                  },
                   {
                       "name":  "browser_navigate",
                       "category":  "navigation",

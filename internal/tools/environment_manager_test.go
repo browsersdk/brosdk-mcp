@@ -25,10 +25,11 @@ func TestWithEnvironmentRestoresActiveEnvironment(t *testing.T) {
 		activeEnvironment: "work",
 	}
 	e.environments["work"] = newBrowserEnvironment("work", "endpoint-a", nil, false)
-	e.environments["work"].CurrentTabID = "tab-a"
-	e.environments["work"].AriaRefStore = cloneAriaRefStore(e.ariaRefStore)
+	e.environments["work"].Pages["tab-a"] = newPageRuntime("tab-a", nil, cloneAriaRefStoreForTab(e.ariaRefStore, "tab-a"))
+	e.environments["work"].ActivePageID = "tab-a"
 	e.environments["personal"] = newBrowserEnvironment("personal", "endpoint-b", nil, false)
-	e.environments["personal"].CurrentTabID = "tab-b"
+	e.environments["personal"].Pages["tab-b"] = newPageRuntime("tab-b", nil, nil)
+	e.environments["personal"].ActivePageID = "tab-b"
 
 	seen := ""
 	_, err := e.withEnvironment(map[string]any{"environment": "personal"}, func() (map[string]any, error) {
@@ -51,7 +52,7 @@ func TestWithEnvironmentRestoresActiveEnvironment(t *testing.T) {
 	if e.currentTabID != "tab-a" {
 		t.Fatalf("expected work tab restored, got %q", e.currentTabID)
 	}
-	if got := e.environments["personal"].CurrentTabID; got != "tab-b-2" {
+	if got := e.environments["personal"].ActivePageID; got != "tab-b-2" {
 		t.Fatalf("expected temporary environment state to persist, got %q", got)
 	}
 }
@@ -97,5 +98,28 @@ func TestAllocateEnvironmentNameLocked(t *testing.T) {
 	}
 	if got := e.allocateEnvironmentNameLocked("sandbox"); got != "sandbox" {
 		t.Fatalf("expected sandbox, got %q", got)
+	}
+}
+
+func TestLoadEnvironmentLockedExportsPageRuntimeState(t *testing.T) {
+	e := &Executor{
+		environments: map[string]*browserEnvironment{},
+	}
+	env := newBrowserEnvironment("work", "endpoint-a", nil, false)
+	env.Pages["tab-a"] = newPageRuntime("tab-a", nil, map[string]ariaRefMeta{
+		"e1": {Role: "button"},
+	})
+	env.ActivePageID = "tab-a"
+	e.environments["work"] = env
+
+	if err := e.loadEnvironmentLocked("work"); err != nil {
+		t.Fatalf("loadEnvironmentLocked returned error: %v", err)
+	}
+	if e.currentTabID != "tab-a" {
+		t.Fatalf("expected currentTabID tab-a, got %q", e.currentTabID)
+	}
+	meta, ok := e.getStoredAriaRefMeta("tab-a", "e1")
+	if !ok || meta.Role != "button" {
+		t.Fatalf("expected aria ref meta to be exported from page runtime, got %#v ok=%v", meta, ok)
 	}
 }

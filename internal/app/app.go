@@ -81,6 +81,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger, buildVersi
 
 		logger.Info("MCP SSE endpoint", "url", endpoints.SSE)
 		logger.Info("MCP message endpoint", "url", endpoints.Message)
+		logger.Info("MCP UI endpoint", "url", endpoints.UI)
 
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

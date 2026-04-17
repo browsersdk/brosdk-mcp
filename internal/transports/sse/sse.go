@@ -21,6 +21,7 @@ type Endpoints struct {
 	SSE     string
 	Message string
 	Session string
+	UI      string
 }
 
 type Server struct {
@@ -69,6 +70,8 @@ func (s *Server) Start() (Endpoints, error) {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleRoot)
+	mux.HandleFunc("/ui", s.handleUI)
 	mux.HandleFunc("/sse", s.handleSSE)
 	mux.HandleFunc("/message", s.handleMessage)
 	mux.HandleFunc("/session", s.handleSession)
@@ -98,6 +101,7 @@ func (s *Server) Start() (Endpoints, error) {
 		SSE:     fmt.Sprintf("http://%s/sse", addr),
 		Message: fmt.Sprintf("http://%s/message", addr),
 		Session: fmt.Sprintf("http://%s/session", addr),
+		UI:      fmt.Sprintf("http://%s/ui", addr),
 	}, nil
 }
 

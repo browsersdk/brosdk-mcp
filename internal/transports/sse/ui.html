@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>brosdk-mcp PageAgent UI</title>
+  <style>
+    :root {
+      --bg: #f4f1ea;
+      --panel: #fffdf8;
+      --ink: #1f2430;
+      --muted: #6a6f7a;
+      --line: #d9d2c3;
+      --accent: #1d6b57;
+      --accent-2: #c96b32;
+      --danger: #b24040;
+      --shadow: 0 14px 40px rgba(40, 33, 20, 0.10);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Noto Sans", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(201, 107, 50, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(29, 107, 87, 0.12), transparent 24%),
+        linear-gradient(180deg, #f7f4ed 0%, var(--bg) 100%);
+    }
+    .shell {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.4fr 0.8fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .hero-card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+    .hero-card {
+      padding: 22px;
+    }
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.1;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .status {
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+    }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px dashed var(--line);
+      font-size: 14px;
+    }
+    .status-row:last-child { border-bottom: 0; padding-bottom: 0; }
+    .layout {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 18px;
+    }
+    .panel {
+      padding: 18px;
+    }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 18px;
+    }
+    label {
+      display: block;
+      margin: 10px 0 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--ink);
+      padding: 11px 12px;
+      font: inherit;
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 13px;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: inherit;
+      font-weight: 600;
+      color: #fff;
+      background: var(--accent);
+      cursor: pointer;
+      transition: transform 120ms ease, opacity 120ms ease;
+    }
+    button.secondary { background: var(--accent-2); }
+    button.ghost {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+    button.danger { background: var(--danger); }
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: 0.6; cursor: wait; transform: none; }
+    .hint {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .chip {
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(29, 107, 87, 0.08);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #191d24;
+      color: #eef2f7;
+      border-radius: 14px;
+      padding: 14px;
+      min-height: 260px;
+      max-height: 720px;
+      overflow: auto;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .tool-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    @media (max-width: 1100px) {
+      .hero, .layout { grid-template-columns: 1fr; }
+      .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 1; }
+      .tool-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-card">
+        <h1>PageAgent Test UI</h1>
+        <p>This local UI lets us launch environments, create page agents, inspect MCP tools, and issue direct tool calls without hand-writing JSON-RPC requests.</p>
+        <div class="chips">
+          <span class="chip">SSE mode only</span>
+          <span class="chip">PageAgent registry</span>
+          <span class="chip">Generic tool runner</span>
+        </div>
+      </div>
+      <div class="hero-card status">
+        <div class="status-row"><strong>Message endpoint</strong><span id="message-endpoint"></span></div>
+        <div class="status-row"><strong>SSE endpoint</strong><span id="sse-endpoint"></span></div>
+        <div class="status-row"><strong>Loaded tools</strong><span id="tool-count">0</span></div>
+        <div class="status-row"><strong>Last status</strong><span id="last-status">Idle</span></div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel span-4">
+        <h2>Environment</h2>
+        <label for="launch-name">Environment name</label>
+        <input id="launch-name" placeholder="optional; auto-assign when empty">
+
+        <label for="launch-path">Browser executable path</label>
+        <input id="launch-path" placeholder="optional; auto-detect Chrome/Chromium">
+
+        <label for="launch-url">Initial URL</label>
+        <input id="launch-url" placeholder="about:blank">
+
+        <div class="tool-grid">
+          <div>
+            <label for="launch-headless">Headless</label>
+            <select id="launch-headless">
+              <option value="true" selected>true</option>
+              <option value="false">false</option>
+            </select>
+          </div>
+          <div>
+            <label for="launch-active">Set active</label>
+            <select id="launch-active">
+              <option value="true" selected>true</option>
+              <option value="false">false</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="launch-env-btn">Launch Environment</button>
+          <button class="ghost" id="list-env-btn">List Environments</button>
+        </div>
+        <div class="hint">This is the quickest way to get a local browser up and bind it into MCP for PageAgent testing.</div>
+      </div>
+
+      <div class="panel span-4">
+        <h2>Create PageAgent</h2>
+        <label for="agent-goal">Goal</label>
+        <textarea id="agent-goal" placeholder="Example: open the pricing page and extract the visible pricing table."></textarea>
+
+        <label for="agent-name">Agent name</label>
+        <input id="agent-name" placeholder="optional">
+
+        <label for="agent-tab">Tab ID</label>
+        <input id="agent-tab" placeholder="optional">
+
+        <label for="agent-env">Environment override</label>
+        <input id="agent-env" placeholder="optional">
+
+        <div class="actions">
+          <button id="create-agent-btn">Create PageAgent</button>
+          <button class="ghost" id="list-agent-btn">List PageAgents</button>
+        </div>
+      </div>
+
+      <div class="panel span-4">
+        <h2>Manage PageAgent</h2>
+        <label for="manage-agent-id">Agent ID</label>
+        <input id="manage-agent-id" placeholder="page-agent-1">
+
+        <div class="actions">
+          <button class="secondary" id="get-agent-btn">Get PageAgent</button>
+          <button class="danger" id="remove-agent-btn">Remove PageAgent</button>
+        </div>
+
+        <label for="quick-tools" style="margin-top:18px;">Quick tools</label>
+        <div class="actions">
+          <button class="ghost" id="list-tools-btn">tools/list</button>
+          <button class="ghost" id="list-tabs-btn">List Tabs</button>
+          <button class="ghost" id="list-page-agents-btn">List PageAgents</button>
+        </div>
+      </div>
+
+      <div class="panel span-5">
+        <h2>Generic Tool Runner</h2>
+        <label for="tool-name">Tool</label>
+        <select id="tool-name"></select>
+
+        <label for="tool-args">Arguments JSON</label>
+        <textarea id="tool-args">{}</textarea>
+
+        <div class="actions">
+          <button id="run-tool-btn">Run Tool</button>
+          <button class="ghost" id="format-json-btn">Format JSON</button>
+        </div>
+        <div class="hint">Use this when you want to test a tool directly or inspect a response payload before wiring PageAgent step execution.</div>
+      </div>
+
+      <div class="panel span-7">
+        <h2>Output</h2>
+        <pre class="pre" id="output"></pre>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const messageEndpoint = `${location.origin}/message`;
+    const sseEndpoint = `${location.origin}/sse`;
+
+    const els = {
+      messageEndpoint: document.getElementById('message-endpoint'),
+      sseEndpoint: document.getElementById('sse-endpoint'),
+      toolCount: document.getElementById('tool-count'),
+      lastStatus: document.getElementById('last-status'),
+      output: document.getElementById('output'),
+      toolName: document.getElementById('tool-name'),
+      toolArgs: document.getElementById('tool-args'),
+      launchName: document.getElementById('launch-name'),
+      launchPath: document.getElementById('launch-path'),
+      launchUrl: document.getElementById('launch-url'),
+      launchHeadless: document.getElementById('launch-headless'),
+      launchActive: document.getElementById('launch-active'),
+      agentGoal: document.getElementById('agent-goal'),
+      agentName: document.getElementById('agent-name'),
+      agentTab: document.getElementById('agent-tab'),
+      agentEnv: document.getElementById('agent-env'),
+      manageAgentId: document.getElementById('manage-agent-id'),
+    };
+
+    let rpcID = 1;
+    let tools = [];
+
+    function setStatus(text) {
+      els.lastStatus.textContent = text;
+    }
+
+    function appendOutput(title, payload) {
+      const stamp = new Date().toLocaleTimeString();
+      const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+      els.output.textContent = `[${stamp}] ${title}\n${text}\n\n` + els.output.textContent;
+    }
+
+    async function callMCP(method, params) {
+      const id = rpcID++;
+      const body = {
+        jsonrpc: '2.0',
+        id,
+        method,
+        params,
+      };
+      const res = await fetch(messageEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const raw = await res.text();
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${raw}`);
+      }
+      if (!raw.trim()) {
+        return {};
+      }
+      const payload = JSON.parse(raw);
+      if (payload.error) {
+        throw new Error(payload.error.message || JSON.stringify(payload.error));
+      }
+      return payload.result || {};
+    }
+
+    async function callTool(name, args) {
+      return callMCP('tools/call', {
+        name,
+        arguments: args || {},
+      });
+    }
+
+    function unwrapToolResult(result) {
+      return result.structuredContent || result;
+    }
+
+    function loadToolOptions(toolItems) {
+      els.toolName.innerHTML = '';
+      toolItems.forEach(tool => {
+        const option = document.createElement('option');
+        option.value = tool.name;
+        option.textContent = tool.name;
+        els.toolName.appendChild(option);
+      });
+      els.toolCount.textContent = String(toolItems.length);
+    }
+
+    async function refreshTools() {
+      setStatus('Loading tools');
+      const result = await callMCP('tools/list', {});
+      tools = result.tools || [];
+      loadToolOptions(tools);
+      appendOutput('tools/list', result);
+      setStatus('Tools loaded');
+    }
+
+    function parseJSONInput(text) {
+      const trimmed = text.trim();
+      if (!trimmed) return {};
+      return JSON.parse(trimmed);
+    }
+
+    async function runNamedTool(name, args) {
+      setStatus(`Running ${name}`);
+      const result = unwrapToolResult(await callTool(name, args));
+      appendOutput(name, result);
+      setStatus(`Completed ${name}`);
+      return result;
+    }
+
+    document.getElementById('launch-env-btn').addEventListener('click', async () => {
+      try {
+        const result = await runNamedTool('browser_launch_environment', {
+          name: els.launchName.value.trim() || undefined,
+          executable_path: els.launchPath.value.trim() || undefined,
+          initial_url: els.launchUrl.value.trim() || undefined,
+          headless: els.launchHeadless.value === 'true',
+          set_active: els.launchActive.value === 'true',
+        });
+        if (result.name) {
+          els.agentEnv.value = result.name;
+        }
+      } catch (err) {
+        appendOutput('browser_launch_environment error', String(err));
+        setStatus('Launch failed');
+      }
+    });
+
+    document.getElementById('list-env-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_list_environments', {});
+      } catch (err) {
+        appendOutput('browser_list_environments error', String(err));
+        setStatus('List environments failed');
+      }
+    });
+
+    document.getElementById('create-agent-btn').addEventListener('click', async () => {
+      try {
+        const result = await runNamedTool('browser_create_page_agent', {
+          goal: els.agentGoal.value,
+          name: els.agentName.value.trim() || undefined,
+          tabId: els.agentTab.value.trim() || undefined,
+          environment: els.agentEnv.value.trim() || undefined,
+        });
+        if (result.agentId) {
+          els.manageAgentId.value = result.agentId;
+        }
+      } catch (err) {
+        appendOutput('browser_create_page_agent error', String(err));
+        setStatus('Create PageAgent failed');
+      }
+    });
+
+    document.getElementById('list-agent-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_list_page_agents', {
+          environment: els.agentEnv.value.trim() || undefined,
+        });
+      } catch (err) {
+        appendOutput('browser_list_page_agents error', String(err));
+        setStatus('List PageAgents failed');
+      }
+    });
+
+    document.getElementById('get-agent-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_get_page_agent', {
+          agentId: els.manageAgentId.value.trim(),
+        });
+      } catch (err) {
+        appendOutput('browser_get_page_agent error', String(err));
+        setStatus('Get PageAgent failed');
+      }
+    });
+
+    document.getElementById('remove-agent-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_remove_page_agent', {
+          agentId: els.manageAgentId.value.trim(),
+        });
+      } catch (err) {
+        appendOutput('browser_remove_page_agent error', String(err));
+        setStatus('Remove PageAgent failed');
+      }
+    });
+
+    document.getElementById('list-tools-btn').addEventListener('click', refreshTools);
+    document.getElementById('list-tabs-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_list_tabs', {});
+      } catch (err) {
+        appendOutput('browser_list_tabs error', String(err));
+      }
+    });
+    document.getElementById('list-page-agents-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_list_page_agents', {});
+      } catch (err) {
+        appendOutput('browser_list_page_agents error', String(err));
+      }
+    });
+
+    document.getElementById('format-json-btn').addEventListener('click', () => {
+      try {
+        const parsed = parseJSONInput(els.toolArgs.value);
+        els.toolArgs.value = JSON.stringify(parsed, null, 2);
+      } catch (err) {
+        appendOutput('JSON format error', String(err));
+      }
+    });
+
+    document.getElementById('run-tool-btn').addEventListener('click', async () => {
+      try {
+        const args = parseJSONInput(els.toolArgs.value);
+        await runNamedTool(els.toolName.value, args);
+      } catch (err) {
+        appendOutput('Generic tool error', String(err));
+        setStatus('Tool run failed');
+      }
+    });
+
+    els.messageEndpoint.textContent = messageEndpoint;
+    els.sseEndpoint.textContent = sseEndpoint;
+    refreshTools().catch(err => {
+      appendOutput('Startup error', String(err));
+      setStatus('Startup failed');
+    });
+  </script>
+</body>
+</html>

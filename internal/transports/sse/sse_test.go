@@ -86,6 +86,58 @@ func TestSSEEndpointEmitsReadyEvent(t *testing.T) {
 	}
 }
 
+func TestUIEndpointServesHTML(t *testing.T) {
+	srv, endpoints := startTestServer(t)
+	defer shutdownTestServer(t, srv)
+
+	resp, err := http.Get(endpoints.UI)
+	if err != nil {
+		t.Fatalf("get ui endpoint failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected ui status: %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("unexpected ui content type: %q", got)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read ui body failed: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "PageAgent Test UI") {
+		t.Fatalf("expected ui body to contain title, got %s", body)
+	}
+	if !strings.Contains(body, "browser_create_page_agent") {
+		t.Fatalf("expected ui body to reference page agent tools, got %s", body)
+	}
+}
+
+func TestRootRedirectsToUI(t *testing.T) {
+	srv, endpoints := startTestServer(t)
+	defer shutdownTestServer(t, srv)
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Get(strings.TrimSuffix(endpoints.UI, "/ui") + "/")
+	if err != nil {
+		t.Fatalf("get root endpoint failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("expected 307 redirect, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != "/ui" {
+		t.Fatalf("unexpected root redirect target: %q", got)
+	}
+}
+
 func TestMessageEndpointMethodNotAllowed(t *testing.T) {
 	srv, endpoints := startTestServer(t)
 	defer shutdownTestServer(t, srv)
