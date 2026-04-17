@@ -181,6 +181,46 @@ Typical flow:
 
 `browser_launch_environment` can launch a local Chrome/Chromium process for you. If `name` is omitted, brosdk-mcp will assign one automatically such as `local`, `local-1`, or `local-2`.
 
+## PageAgent Plan
+
+The next major direction is introducing a `PageAgent` concept for AI agents that operate on a specific page.
+
+This is separate from the current browser MCP tools. The intended design is:
+
+1. Strengthen the page runtime inside the MCP server
+2. Introduce page-scoped agent state and memory
+3. Add controlled PageAgent MCP tools
+4. Expand toward multi-step and eventually autonomous page-level execution
+
+Planned layers:
+
+- Page runtime:
+  - page identity
+  - page-scoped CDP session
+  - page-scoped refs, waits, and cached page state
+- AI PageAgent:
+  - page goal
+  - page-scoped memory
+  - action planning
+  - controlled tool execution on one page
+
+Planned MCP surface for the first PageAgent iteration:
+
+- `browser_create_page_agent`
+- `browser_list_page_agents`
+- `browser_get_page_agent`
+- `browser_run_page_agent_step`
+- `browser_remove_page_agent`
+
+Implementation plan:
+
+1. Introduce internal page runtime objects without changing existing browser tool semantics
+2. Migrate tab and page state out of the global executor into page-scoped runtime structures
+3. Add PageAgent registry and state model
+4. Add step-based PageAgent execution before attempting autonomous loops
+
+The current recommendation is to keep `PageAgent` as an AI-agent concept while continuing to expose browser-native concepts like `tab` and `page` in the public MCP API where possible.
+
 ## Development
 
 Run unit tests:
