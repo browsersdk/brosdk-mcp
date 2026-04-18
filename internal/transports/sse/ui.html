@@ -352,6 +352,7 @@
         <div class="actions">
           <button class="secondary" id="get-agent-btn">Get PageAgent</button>
           <button id="step-agent-btn">Run Step</button>
+          <button id="run-loop-btn">Run Loop</button>
           <button class="secondary" id="apply-proposal-btn">Apply Proposal</button>
           <button class="danger" id="remove-agent-btn">Remove PageAgent</button>
         </div>
@@ -764,6 +765,19 @@
       } catch (err) {
         appendOutput('browser_apply_page_agent_proposal error', String(err));
         setStatus('Apply proposal failed');
+      }
+    });
+
+    document.getElementById('run-loop-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_run_page_agent_loop', {
+          agentId: els.manageAgentId.value.trim(),
+          maxSteps: 3,
+          maxChars: 2000,
+        });
+      } catch (err) {
+        appendOutput('browser_run_page_agent_loop error', String(err));
+        setStatus('Run loop failed');
       }
     });
 

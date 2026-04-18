@@ -864,3 +864,81 @@ func (e *Executor) callApplyPageAgentProposal(ctx context.Context, args map[stri
 	}
 	return result, nil
 }
+
+func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any) (map[string]any, error) {
+	agentID, ok := getStringArg(args, "agentId")
+	if !ok || strings.TrimSpace(agentID) == "" {
+		return nil, fmt.Errorf("missing required argument agentId")
+	}
+	agentID = strings.TrimSpace(agentID)
+
+	maxSteps := getIntArgDefault(args, "maxSteps", 3)
+	if maxSteps < 1 {
+		maxSteps = 1
+	}
+	if maxSteps > 20 {
+		maxSteps = 20
+	}
+
+	maxChars := getIntArgDefault(args, "maxChars", 2000)
+	if maxChars <= 0 {
+		maxChars = 2000
+	}
+
+	steps := make([]map[string]any, 0, maxSteps)
+	stopReason := "max_steps_reached"
+
+	for i := 0; i < maxSteps; i++ {
+		stepResult, err := e.callRunPageAgentStep(ctx, map[string]any{
+			"agentId":  agentID,
+			"maxChars": maxChars,
+		})
+		if err != nil {
+			return nil, err
+		}
+		stepPayload := map[string]any{
+			"phase": "step",
+			"data":  stepResult,
+		}
+		steps = append(steps, stepPayload)
+
+		stepBody, _ := stepResult["stepResult"].(map[string]any)
+		proposal, _ := stepBody["nextActionProposal"].(map[string]any)
+		if len(proposal) == 0 {
+			stopReason = "no_proposal"
+			break
+		}
+
+		applyResult, err := e.callApplyPageAgentProposal(ctx, map[string]any{
+			"agentId": agentID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		steps = append(steps, map[string]any{
+			"phase": "apply",
+			"data":  applyResult,
+		})
+
+		applyBody, _ := applyResult["applyResult"].(map[string]any)
+		nextProposal, _ := applyBody["nextActionProposal"].(map[string]any)
+		if len(nextProposal) == 0 {
+			stopReason = "no_followup_proposal"
+			break
+		}
+	}
+
+	agentResult, err := e.callGetPageAgent(ctx, map[string]any{"agentId": agentID})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"ok":         true,
+		"agentId":    agentID,
+		"maxSteps":   maxSteps,
+		"stopReason": stopReason,
+		"steps":      steps,
+		"agent":      agentResult,
+	}, nil
+}

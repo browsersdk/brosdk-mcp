@@ -101,6 +101,8 @@ func (e *Executor) Call(ctx context.Context, name string, args map[string]any) (
 		return e.callGetPageAgent(ctx, args)
 	case "browser_run_page_agent_step":
 		return e.callRunPageAgentStep(ctx, args)
+	case "browser_run_page_agent_loop":
+		return e.callRunPageAgentLoop(ctx, args)
 	case "browser_apply_page_agent_proposal":
 		return e.callApplyPageAgentProposal(ctx, args)
 	case "browser_remove_page_agent":

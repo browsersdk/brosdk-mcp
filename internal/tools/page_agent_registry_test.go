@@ -277,3 +277,10 @@ func TestApplyPageAgentProposalRecordsHistory(t *testing.T) {
 		t.Fatalf("expected applied history status, got %#v", e.pageAgents[agent.ID].History[0])
 	}
 }
+
+func TestRunPageAgentLoopRequiresAgent(t *testing.T) {
+	e := &Executor{pageAgents: map[string]*pageAgent{}}
+	if _, err := e.callRunPageAgentLoop(context.Background(), map[string]any{"agentId": "missing"}); err == nil {
+		t.Fatal("expected missing agent error")
+	}
+}

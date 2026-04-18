@@ -8,7 +8,7 @@ The project focuses on reliable page interaction, ARIA-based snapshots, tab mana
 
 - Supports `stdio` and `SSE` transport modes.
 - Can connect to an existing Chrome/Chromium instance via `--remote-debugging-port`.
-- Exposes 38 browser tools through MCP.
+- Exposes 39 browser tools through MCP.
 - Provides ARIA snapshots with `ref` identifiers for follow-up `by_ref` actions.
 - Supports Shadow DOM traversal and frame-aware fallback for ref-based actions.
 - Supports multiple browser environments in one MCP server process.
@@ -18,7 +18,7 @@ The project focuses on reliable page interaction, ARIA-based snapshots, tab mana
 
 Current tools:
 
-- Agents: `browser_create_page_agent`, `browser_list_page_agents`, `browser_get_page_agent`, `browser_run_page_agent_step`, `browser_apply_page_agent_proposal`, `browser_remove_page_agent`
+- Agents: `browser_create_page_agent`, `browser_list_page_agents`, `browser_get_page_agent`, `browser_run_page_agent_step`, `browser_run_page_agent_loop`, `browser_apply_page_agent_proposal`, `browser_remove_page_agent`
 - Navigation: `browser_navigate`, `browser_reload`, `browser_go_back`, `browser_go_forward`
 - Inspection: `browser_aria_snapshot`, `browser_screenshot`, `browser_get_text`, `browser_evaluate`
 - Interaction: `browser_click`, `browser_click_by_ref`, `browser_type`, `browser_type_by_ref`, `browser_set_input_value`, `browser_set_input_value_by_ref`, `browser_find_and_click_text`, `browser_press`, `browser_scroll`
@@ -242,6 +242,7 @@ Planned MCP surface for the first PageAgent iteration:
 - `browser_list_page_agents`
 - `browser_get_page_agent`
 - `browser_run_page_agent_step`
+- `browser_run_page_agent_loop`
 - `browser_apply_page_agent_proposal`
 - `browser_remove_page_agent`
 
@@ -261,6 +262,7 @@ Current status:
 - PageAgent proposals can now be applied in a controlled way
 - The next refinement is making proposals more concrete by extracting candidate refs from page snapshots
 - Click-oriented proposals can now target concrete refs from the page snapshot
+- A controlled `maxSteps` PageAgent loop is now available for multi-step testing
 - Autonomous loops are not implemented yet
 
 The current recommendation is to keep `PageAgent` as an AI-agent concept while continuing to expose browser-native concepts like `tab` and `page` in the public MCP API where possible.
