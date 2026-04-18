@@ -727,6 +727,169 @@ func TestE2ELaunchLocalEnvironmentStdio(t *testing.T) {
 	}
 }
 
+func TestE2EPageAgentAIWorkflowSSE(t *testing.T) {
+	if os.Getenv("BROSDK_E2E") != "1" {
+		t.Skip("set BROSDK_E2E=1 to run e2e test")
+	}
+	if os.Getenv("BROSDK_PAGEAGENT_AI_E2E") != "1" {
+		t.Skip("set BROSDK_PAGEAGENT_AI_E2E=1 to run PageAgent AI e2e test")
+	}
+
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	baseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
+	if apiKey == "" || baseURL == "" || model == "" {
+		t.Skip("OPENAI_API_KEY, OPENAI_BASE_URL, and OPENAI_MODEL must be set")
+	}
+
+	chromePath, ok := findChromeExecutable()
+	if !ok {
+		t.Skip("chrome executable not found")
+	}
+
+	fixtureURL, shutdownFixture := startInteractionFixtureServer(t)
+	defer shutdownFixture()
+
+	tempDir := t.TempDir()
+	chromeCmd, debugPort, _, err := startChromeWithDynamicDebugPort(chromePath, tempDir)
+	if err != nil {
+		t.Fatalf("start chrome failed: %v", err)
+	}
+	defer func() {
+		_ = chromeCmd.Process.Kill()
+		_, _ = chromeCmd.Process.Wait()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	ssePort := findFreeTCPPort(t)
+	messageEndpoint := fmt.Sprintf("http://127.0.0.1:%d/message", ssePort)
+	configEndpoint := fmt.Sprintf("http://127.0.0.1:%d/ui/config", ssePort)
+
+	var mcpStderr bytes.Buffer
+	mcpCmd := exec.CommandContext(
+		ctx,
+		"go", "run", "./cmd/brosdk-mcp",
+		"--mode", "sse",
+		"--cdp", fmt.Sprintf("127.0.0.1:%d", debugPort),
+		"--schema", "schemas/browser-tools.schema.json",
+		"--port", strconv.Itoa(ssePort),
+	)
+	mcpCmd.Dir = repoRootFromTest(t)
+	mcpCmd.Stdout = io.Discard
+	mcpCmd.Stderr = &mcpStderr
+
+	if err := mcpCmd.Start(); err != nil {
+		t.Fatalf("start mcp failed: %v", err)
+	}
+	defer func() {
+		_ = mcpCmd.Process.Kill()
+		_, _ = mcpCmd.Process.Wait()
+	}()
+
+	if err := postPageAgentAIConfig(ctx, configEndpoint, apiKey, baseURL, model); err != nil {
+		t.Fatalf("configure page agent ai failed: %v", err)
+	}
+
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9701, "browser_navigate", map[string]any{"url": fixtureURL}); err != nil {
+		t.Fatalf("navigate failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9702, "browser_wait_for_selector", map[string]any{
+		"selector":  "#nameInput",
+		"state":     "visible",
+		"timeoutMs": 30000,
+	}); err != nil {
+		t.Fatalf("wait_for_selector failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+
+	createResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9703, "browser_create_page_agent", map[string]any{
+		"goal": `type "Alice" into the Name Input textbox and then click the Apply button`,
+	})
+	if err != nil {
+		t.Fatalf("create page agent failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	agentID, _ := createResult["agentId"].(string)
+	if strings.TrimSpace(agentID) == "" {
+		t.Fatalf("expected agentId from create result, got %#v", createResult)
+	}
+
+	stepResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9704, "browser_run_page_agent_step", map[string]any{
+		"agentId":  agentID,
+		"maxChars": 2000,
+	})
+	if err != nil {
+		t.Fatalf("run page agent step failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	stepPayload, _ := stepResult["stepResult"].(map[string]any)
+	if stepPayload == nil {
+		t.Fatalf("missing stepResult payload: %#v", stepResult)
+	}
+	if src, _ := stepPayload["proposalSource"].(string); src != "ai" {
+		t.Fatalf("expected AI proposal source, got %#v", stepPayload)
+	}
+	firstProposal, _ := stepPayload["nextActionProposal"].(map[string]any)
+	if firstProposal == nil {
+		t.Fatalf("missing nextActionProposal: %#v", stepPayload)
+	}
+	firstTool, _ := firstProposal["tool"].(string)
+	if firstTool != "browser_type_by_ref" {
+		t.Fatalf("expected first proposal to type by ref, got %#v", firstProposal)
+	}
+
+	applyOne, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9705, "browser_apply_page_agent_proposal", map[string]any{
+		"agentId": agentID,
+	})
+	if err != nil {
+		t.Fatalf("apply first proposal failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	applyOnePayload, _ := applyOne["applyResult"].(map[string]any)
+	if applyOnePayload == nil {
+		t.Fatalf("missing first applyResult payload: %#v", applyOne)
+	}
+	if src, _ := applyOnePayload["nextActionProposalSource"].(string); src != "ai" {
+		t.Fatalf("expected AI follow-up proposal source, got %#v", applyOnePayload)
+	}
+	nextProposal, _ := applyOnePayload["nextActionProposal"].(map[string]any)
+	if nextProposal == nil {
+		t.Fatalf("missing follow-up proposal after typing: %#v", applyOnePayload)
+	}
+	nextTool, _ := nextProposal["tool"].(string)
+	if nextTool != "browser_click_by_ref" {
+		t.Fatalf("expected follow-up click proposal, got %#v", nextProposal)
+	}
+
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9706, "browser_apply_page_agent_proposal", map[string]any{
+		"agentId": agentID,
+	}); err != nil {
+		t.Fatalf("apply second proposal failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+
+	waitTextResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9707, "browser_wait_for_text", map[string]any{
+		"text":      "result:Alice:apply",
+		"timeoutMs": 30000,
+	})
+	if err != nil {
+		t.Fatalf("wait_for_text after page agent apply failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if okValue, ok := waitTextResult["ok"].(bool); !ok || !okValue {
+		t.Fatalf("unexpected wait_for_text result: %#v", waitTextResult)
+	}
+
+	agentResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9708, "browser_get_page_agent", map[string]any{
+		"agentId": agentID,
+	})
+	if err != nil {
+		t.Fatalf("get page agent failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if historyCount, _ := agentResult["historyCount"].(float64); historyCount < 3 {
+		t.Fatalf("expected at least 3 history entries, got %#v", agentResult)
+	}
+	if status, _ := agentResult["status"].(string); status != "idle" {
+		t.Fatalf("expected final page agent status idle, got %#v", agentResult)
+	}
+}
+
 func sendToolsCall(t *testing.T, stdin io.Writer, reader *bufio.Reader, id int, name string, args map[string]any) map[string]any {
 	t.Helper()
 
@@ -1086,6 +1249,55 @@ func findFreeTCPPort(t *testing.T) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func postPageAgentAIConfig(ctx context.Context, endpoint string, apiKey string, baseURL string, model string) error {
+	deadline := time.Now().Add(20 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		err := postPageAgentAIConfigOnce(endpoint, apiKey, baseURL, model)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("unknown ui config error")
+	}
+	return lastErr
+}
+
+func postPageAgentAIConfigOnce(endpoint string, apiKey string, baseURL string, model string) error {
+	body, err := json.Marshal(map[string]any{
+		"apiKey":  apiKey,
+		"baseUrl": baseURL,
+		"model":   model,
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := http.Post(endpoint, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status %d body=%s", resp.StatusCode, string(raw))
+	}
+	if !strings.Contains(string(raw), `"configured":true`) {
+		return fmt.Errorf("ai config response did not mark configured=true: %s", string(raw))
+	}
+	return nil
 }
 
 func startInteractionFixtureServer(t *testing.T) (string, func()) {

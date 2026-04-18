@@ -648,8 +648,10 @@ func (e *Executor) callRunPageAgentStep(ctx context.Context, args map[string]any
 		text, _ := textResult["text"].(string)
 		snapshot, _ := snapshotResult["snapshot"].(string)
 		proposal, aiErr := e.generateAIProposal(ctx, bound.Goal, text, snapshot, "")
+		proposalSource := "ai"
 		if aiErr != nil {
 			proposal = proposeNextAction(bound.Goal, text, snapshot)
+			proposalSource = "rules"
 		}
 		stepResult := map[string]any{
 			"ok":                 true,
@@ -657,6 +659,7 @@ func (e *Executor) callRunPageAgentStep(ctx context.Context, args map[string]any
 			"text":               text,
 			"snapshot":           snapshot,
 			"tabId":              bound.TabID,
+			"proposalSource":     proposalSource,
 			"nextActionProposal": proposal,
 		}
 
@@ -796,12 +799,15 @@ func (e *Executor) callApplyPageAgentProposal(ctx context.Context, args map[stri
 				text, _ := textResult["text"].(string)
 				snapshot, _ := snapshotResult["snapshot"].(string)
 				aiProposal, aiErr := e.generateAIProposal(ctx, bound.Goal, text, snapshot, toolName)
+				nextProposalSource := "ai"
 				if aiErr == nil {
 					nextProposal = aiProposal
 				} else {
 					nextProposal = proposeNextActionFromContext(bound.Goal, text, snapshot, toolName)
+					nextProposalSource = "rules"
 				}
 				applyResult["nextActionProposal"] = nextProposal
+				applyResult["nextActionProposalSource"] = nextProposalSource
 				applyResult["postActionText"] = text
 				applyResult["postActionSnapshot"] = snapshot
 			}
