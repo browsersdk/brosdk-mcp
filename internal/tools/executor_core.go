@@ -24,6 +24,7 @@ type Executor struct {
 
 	pageAgents      map[string]*pageAgent
 	nextPageAgentID int
+	pageAgentAI     *pageAgentAIClient
 
 	environments      map[string]*browserEnvironment
 	activeEnvironment string
@@ -41,6 +42,7 @@ func NewExecutor(ctx context.Context, browserClient *cdp.Client, cdpEndpoint str
 		lowInjection:  lowInjection,
 		ariaRefStore:  make(map[string]map[string]ariaRefMeta),
 		pageAgents:    make(map[string]*pageAgent),
+		pageAgentAI:   newPageAgentAIClient(),
 	}
 
 	if browserClient != nil {
@@ -97,6 +99,10 @@ func (e *Executor) Call(ctx context.Context, name string, args map[string]any) (
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callListPageAgents(ctx, args) })
 	case "browser_get_page_agent":
 		return e.callGetPageAgent(ctx, args)
+	case "browser_run_page_agent_step":
+		return e.callRunPageAgentStep(ctx, args)
+	case "browser_apply_page_agent_proposal":
+		return e.callApplyPageAgentProposal(ctx, args)
 	case "browser_remove_page_agent":
 		return e.callRemovePageAgent(ctx, args)
 	case "browser_connect_environment":

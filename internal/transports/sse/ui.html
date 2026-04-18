@@ -75,6 +75,13 @@
       grid-template-columns: repeat(12, 1fr);
       gap: 18px;
     }
+    .section-title {
+      margin: 6px 0 12px;
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
     .panel {
       padding: 18px;
     }
@@ -176,6 +183,64 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
+    .proposal-card, .history-list {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+    .proposal-card {
+      padding: 14px;
+    }
+    .proposal-title {
+      margin: 0 0 8px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .proposal-meta {
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .proposal-meta strong {
+      color: var(--ink);
+    }
+    .history-list {
+      max-height: 420px;
+      overflow: auto;
+    }
+    .history-item {
+      padding: 12px 14px;
+      border-bottom: 1px dashed var(--line);
+    }
+    .history-item:last-child {
+      border-bottom: 0;
+    }
+    .history-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .history-summary {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .mini {
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 10px;
+      background: #191d24;
+      color: #eef2f7;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     @media (max-width: 1100px) {
       .hero, .layout { grid-template-columns: 1fr; }
       .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 1; }
@@ -204,6 +269,26 @@
     </section>
 
     <section class="layout">
+      <div class="span-12 section-title">MCP Layer</div>
+      <div class="panel span-4">
+        <h2>PageAgent AI</h2>
+        <label for="ai-api-key">OPENAI_API_KEY</label>
+        <input id="ai-api-key" type="password" placeholder="paste API key for AI-powered proposals">
+
+        <label for="ai-base-url">baseUrl</label>
+        <input id="ai-base-url" placeholder="https://api.openai.com/v1">
+
+        <label for="ai-model">model</label>
+        <input id="ai-model" placeholder="gpt-5">
+
+        <div class="actions">
+          <button id="save-ai-config-btn">Save AI Config</button>
+          <button class="ghost" id="load-ai-config-btn">Load AI Config</button>
+          <button class="danger" id="clear-ai-config-btn">Clear AI Config</button>
+        </div>
+        <div class="hint">When configured, PageAgent step generation will try the AI backend first and fall back to the built-in rule engine if the request fails.</div>
+      </div>
+
       <div class="panel span-4">
         <h2>Environment</h2>
         <label for="launch-name">Environment name</label>
@@ -266,6 +351,8 @@
 
         <div class="actions">
           <button class="secondary" id="get-agent-btn">Get PageAgent</button>
+          <button id="step-agent-btn">Run Step</button>
+          <button class="secondary" id="apply-proposal-btn">Apply Proposal</button>
           <button class="danger" id="remove-agent-btn">Remove PageAgent</button>
         </div>
 
@@ -292,8 +379,36 @@
         <div class="hint">Use this when you want to test a tool directly or inspect a response payload before wiring PageAgent step execution.</div>
       </div>
 
-      <div class="panel span-7">
+      <div class="span-12 section-title">PageAgent Layer</div>
+
+      <div class="panel span-4">
+        <h2>PageAgent State</h2>
+        <div class="hint">This panel tracks the currently inspected PageAgent as an AI-layer object on top of the lower-level MCP browser tools.</div>
+        <label for="agent-state-id">Current agent</label>
+        <input id="agent-state-id" placeholder="No agent selected" readonly>
+        <div class="hint" id="agent-state-summary">Load or create a PageAgent to inspect its current status.</div>
+      </div>
+
+      <div class="panel span-4">
+        <h2>Last Proposal</h2>
+        <div class="proposal-card" id="proposal-panel">
+          <div class="proposal-title">No proposal yet</div>
+          <div class="proposal-meta">Run a PageAgent step to populate the current proposal.</div>
+        </div>
+      </div>
+
+      <div class="panel span-4">
+        <h2>History</h2>
+        <div class="history-list" id="history-panel">
+          <div class="history-item">
+            <div class="history-summary">No history yet. Run a PageAgent step or apply a proposal to start recording agent activity.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel span-12">
         <h2>Output</h2>
+        <div class="hint">PageAgent responses now include `history`, `historyCount`, and `nextActionProposal`. After each step, look under `agent.history` and `stepResult.nextActionProposal` to review the execution trail and suggested next move.</div>
         <pre class="pre" id="output"></pre>
       </div>
     </section>
@@ -309,6 +424,9 @@
       toolCount: document.getElementById('tool-count'),
       lastStatus: document.getElementById('last-status'),
       output: document.getElementById('output'),
+      aiApiKey: document.getElementById('ai-api-key'),
+      aiBaseUrl: document.getElementById('ai-base-url'),
+      aiModel: document.getElementById('ai-model'),
       toolName: document.getElementById('tool-name'),
       toolArgs: document.getElementById('tool-args'),
       launchName: document.getElementById('launch-name'),
@@ -321,10 +439,17 @@
       agentTab: document.getElementById('agent-tab'),
       agentEnv: document.getElementById('agent-env'),
       manageAgentId: document.getElementById('manage-agent-id'),
+      agentStateId: document.getElementById('agent-state-id'),
+      agentStateSummary: document.getElementById('agent-state-summary'),
+      proposalPanel: document.getElementById('proposal-panel'),
+      historyPanel: document.getElementById('history-panel'),
     };
+
+    const uiConfigEndpoint = `${location.origin}/ui/config`;
 
     let rpcID = 1;
     let tools = [];
+    let currentAgent = null;
 
     function setStatus(text) {
       els.lastStatus.textContent = text;
@@ -334,6 +459,69 @@
       const stamp = new Date().toLocaleTimeString();
       const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
       els.output.textContent = `[${stamp}] ${title}\n${text}\n\n` + els.output.textContent;
+    }
+
+    function renderProposal(proposal) {
+      if (!proposal || typeof proposal !== 'object' || !proposal.tool) {
+        els.proposalPanel.innerHTML = `
+          <div class="proposal-title">No proposal yet</div>
+          <div class="proposal-meta">Run a PageAgent step to populate the current proposal.</div>
+        `;
+        return;
+      }
+      const args = proposal.arguments ? JSON.stringify(proposal.arguments, null, 2) : '{}';
+      const target = proposal.target ? JSON.stringify(proposal.target, null, 2) : '';
+      els.proposalPanel.innerHTML = `
+        <div class="proposal-title">${proposal.tool}</div>
+        <div class="proposal-meta">
+          <div><strong>Reason</strong><br>${proposal.reason || 'No reason provided'}</div>
+          <div><strong>Confidence</strong><br>${proposal.confidence || 'unknown'}</div>
+          <div><strong>Arguments</strong><div class="mini">${args}</div></div>
+          ${target ? `<div><strong>Target</strong><div class="mini">${target}</div></div>` : ''}
+        </div>
+      `;
+    }
+
+    function renderHistory(history) {
+      if (!Array.isArray(history) || history.length === 0) {
+        els.historyPanel.innerHTML = `
+          <div class="history-item">
+            <div class="history-summary">No history yet. Run a PageAgent step or apply a proposal to start recording agent activity.</div>
+          </div>
+        `;
+        return;
+      }
+      els.historyPanel.innerHTML = history.slice().reverse().map(entry => {
+        const result = entry.result ? JSON.stringify(entry.result, null, 2) : '';
+        return `
+          <div class="history-item">
+            <div class="history-head">
+              <span>Step ${entry.step}</span>
+              <span>${entry.status || 'unknown'}</span>
+            </div>
+            <div class="history-summary">${entry.summary || ''}</div>
+            ${result ? `<div class="mini">${result}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function updateAgentPanels(agent) {
+      currentAgent = agent || null;
+      if (!currentAgent) {
+        els.agentStateId.value = '';
+        els.agentStateSummary.textContent = 'Load or create a PageAgent to inspect its current status.';
+        renderProposal(null);
+        renderHistory([]);
+        return;
+      }
+      els.agentStateId.value = currentAgent.agentId || '';
+      els.agentStateSummary.textContent = `Status: ${currentAgent.status || 'unknown'} | Environment: ${currentAgent.environment || '-'} | Tab: ${currentAgent.tabId || '-'} | History: ${currentAgent.historyCount || 0}`;
+      renderProposal(currentAgent.lastProposal);
+      renderHistory(currentAgent.history);
+      if (currentAgent.agentId) {
+        els.manageAgentId.value = currentAgent.agentId;
+      }
     }
 
     async function callMCP(method, params) {
@@ -404,8 +592,35 @@
       setStatus(`Running ${name}`);
       const result = unwrapToolResult(await callTool(name, args));
       appendOutput(name, result);
+      if (result && result.agent && typeof result.agent === 'object') {
+        updateAgentPanels(result.agent);
+      } else if (name === 'browser_get_page_agent' && result && result.agentId) {
+        updateAgentPanels(result);
+      } else if (name === 'browser_create_page_agent' && result && result.agentId) {
+        updateAgentPanels(result);
+      } else if (name === 'browser_list_page_agents' && currentAgent && Array.isArray(result.pageAgents)) {
+        const refreshed = result.pageAgents.find(agent => agent.agentId === currentAgent.agentId);
+        if (refreshed) {
+          updateAgentPanels(refreshed);
+        }
+      } else if (name === 'browser_remove_page_agent') {
+        updateAgentPanels(null);
+      }
       setStatus(`Completed ${name}`);
       return result;
+    }
+
+    async function loadAIConfig() {
+      const res = await fetch(uiConfigEndpoint);
+      const payload = await res.json();
+      if (payload.baseUrl) {
+        els.aiBaseUrl.value = payload.baseUrl;
+      }
+      if (payload.model) {
+        els.aiModel.value = payload.model;
+      }
+      appendOutput('ui/config', payload);
+      setStatus(payload.configured ? 'AI config loaded' : 'AI config empty');
     }
 
     document.getElementById('launch-env-btn').addEventListener('click', async () => {
@@ -432,6 +647,50 @@
       } catch (err) {
         appendOutput('browser_list_environments error', String(err));
         setStatus('List environments failed');
+      }
+    });
+
+    document.getElementById('save-ai-config-btn').addEventListener('click', async () => {
+      try {
+        setStatus('Saving AI config');
+        const res = await fetch(uiConfigEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            apiKey: els.aiApiKey.value,
+            baseUrl: els.aiBaseUrl.value.trim() || undefined,
+            model: els.aiModel.value.trim() || undefined,
+          }),
+        });
+        const payload = await res.json();
+        appendOutput('save ai config', payload);
+        els.aiApiKey.value = '';
+        setStatus('AI config saved');
+      } catch (err) {
+        appendOutput('save ai config error', String(err));
+        setStatus('Save AI config failed');
+      }
+    });
+
+    document.getElementById('load-ai-config-btn').addEventListener('click', async () => {
+      try {
+        await loadAIConfig();
+      } catch (err) {
+        appendOutput('load ai config error', String(err));
+        setStatus('Load AI config failed');
+      }
+    });
+
+    document.getElementById('clear-ai-config-btn').addEventListener('click', async () => {
+      try {
+        setStatus('Clearing AI config');
+        await fetch(uiConfigEndpoint, { method: 'DELETE' });
+        els.aiApiKey.value = '';
+        appendOutput('clear ai config', { ok: true });
+        setStatus('AI config cleared');
+      } catch (err) {
+        appendOutput('clear ai config error', String(err));
+        setStatus('Clear AI config failed');
       }
     });
 
@@ -485,6 +744,29 @@
       }
     });
 
+    document.getElementById('step-agent-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_run_page_agent_step', {
+          agentId: els.manageAgentId.value.trim(),
+          maxChars: 2000,
+        });
+      } catch (err) {
+        appendOutput('browser_run_page_agent_step error', String(err));
+        setStatus('Run step failed');
+      }
+    });
+
+    document.getElementById('apply-proposal-btn').addEventListener('click', async () => {
+      try {
+        await runNamedTool('browser_apply_page_agent_proposal', {
+          agentId: els.manageAgentId.value.trim(),
+        });
+      } catch (err) {
+        appendOutput('browser_apply_page_agent_proposal error', String(err));
+        setStatus('Apply proposal failed');
+      }
+    });
+
     document.getElementById('list-tools-btn').addEventListener('click', refreshTools);
     document.getElementById('list-tabs-btn').addEventListener('click', async () => {
       try {
@@ -522,7 +804,7 @@
 
     els.messageEndpoint.textContent = messageEndpoint;
     els.sseEndpoint.textContent = sseEndpoint;
-    refreshTools().catch(err => {
+    Promise.all([refreshTools(), loadAIConfig()]).catch(err => {
       appendOutput('Startup error', String(err));
       setStatus('Startup failed');
     });

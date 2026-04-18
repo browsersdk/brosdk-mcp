@@ -16,10 +16,48 @@ import (
 	"brosdk-mcp/internal/schema"
 )
 
-type stubExecutor struct{}
+type stubExecutor struct {
+	aiConfigured bool
+	baseURL      string
+	model        string
+}
 
 func (s *stubExecutor) Call(context.Context, string, map[string]any) (map[string]any, error) {
 	return map[string]any{"ok": true}, nil
+}
+
+func (s *stubExecutor) SetPageAgentAIConfig(apiKey string, baseURL string, model string) {
+	s.aiConfigured = strings.TrimSpace(apiKey) != ""
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	if model == "" {
+		model = "gpt-5"
+	}
+	s.baseURL = baseURL
+	s.model = model
+}
+
+func (s *stubExecutor) ClearPageAgentAIConfig() {
+	s.aiConfigured = false
+	s.baseURL = "https://api.openai.com/v1"
+	s.model = "gpt-5"
+}
+
+func (s *stubExecutor) PageAgentAIConfigInfo() map[string]any {
+	baseURL := s.baseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	model := s.model
+	if model == "" {
+		model = "gpt-5"
+	}
+	return map[string]any{
+		"configured": s.aiConfigured,
+		"baseUrl":    baseURL,
+		"model":      model,
+	}
 }
 
 func TestMessageEndpointRoutesToMCPHandler(t *testing.T) {
@@ -135,6 +173,34 @@ func TestRootRedirectsToUI(t *testing.T) {
 	}
 	if got := resp.Header.Get("Location"); got != "/ui" {
 		t.Fatalf("unexpected root redirect target: %q", got)
+	}
+}
+
+func TestUIConfigEndpointRoundTrip(t *testing.T) {
+	srv, endpoints := startTestServer(t)
+	defer shutdownTestServer(t, srv)
+
+	configURL := strings.TrimSuffix(endpoints.UI, "/ui") + "/ui/config"
+	body := []byte(`{"apiKey":"sk-test","baseUrl":"https://api.openai.com/v1","model":"gpt-5"}`)
+	respRaw, status, _ := postJSONWithHeaders(t, configURL, body, nil)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected ui config status: %d body=%s", status, string(respRaw))
+	}
+	if !strings.Contains(string(respRaw), `"configured":true`) {
+		t.Fatalf("expected configured=true, got %s", string(respRaw))
+	}
+
+	resp, err := http.Get(configURL)
+	if err != nil {
+		t.Fatalf("get ui config failed: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read ui config failed: %v", err)
+	}
+	if !strings.Contains(string(raw), `"model":"gpt-5"`) {
+		t.Fatalf("expected stored model in config payload, got %s", string(raw))
 	}
 }
 

@@ -51,6 +51,12 @@ type sessionState struct {
 	ClientCount int
 }
 
+type pageAgentAIConfigManager interface {
+	SetPageAgentAIConfig(apiKey string, baseURL string, model string)
+	ClearPageAgentAIConfig()
+	PageAgentAIConfigInfo() map[string]any
+}
+
 const sessionTTL = 5 * time.Minute
 
 func NewServer(port int, logger *slog.Logger, handler *mcp.Handler) *Server {
@@ -72,6 +78,7 @@ func (s *Server) Start() (Endpoints, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/ui", s.handleUI)
+	mux.HandleFunc("/ui/config", s.handleUIConfig)
 	mux.HandleFunc("/sse", s.handleSSE)
 	mux.HandleFunc("/message", s.handleMessage)
 	mux.HandleFunc("/session", s.handleSession)

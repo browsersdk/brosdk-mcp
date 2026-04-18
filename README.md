@@ -8,7 +8,7 @@ The project focuses on reliable page interaction, ARIA-based snapshots, tab mana
 
 - Supports `stdio` and `SSE` transport modes.
 - Can connect to an existing Chrome/Chromium instance via `--remote-debugging-port`.
-- Exposes 36 browser tools through MCP.
+- Exposes 38 browser tools through MCP.
 - Provides ARIA snapshots with `ref` identifiers for follow-up `by_ref` actions.
 - Supports Shadow DOM traversal and frame-aware fallback for ref-based actions.
 - Supports multiple browser environments in one MCP server process.
@@ -18,7 +18,7 @@ The project focuses on reliable page interaction, ARIA-based snapshots, tab mana
 
 Current tools:
 
-- Agents: `browser_create_page_agent`, `browser_list_page_agents`, `browser_get_page_agent`, `browser_remove_page_agent`
+- Agents: `browser_create_page_agent`, `browser_list_page_agents`, `browser_get_page_agent`, `browser_run_page_agent_step`, `browser_apply_page_agent_proposal`, `browser_remove_page_agent`
 - Navigation: `browser_navigate`, `browser_reload`, `browser_go_back`, `browser_go_forward`
 - Inspection: `browser_aria_snapshot`, `browser_screenshot`, `browser_get_text`, `browser_evaluate`
 - Interaction: `browser_click`, `browser_click_by_ref`, `browser_type`, `browser_type_by_ref`, `browser_set_input_value`, `browser_set_input_value_by_ref`, `browser_find_and_click_text`, `browser_press`, `browser_scroll`
@@ -109,6 +109,20 @@ The first version is intended for PageAgent and tool testing:
 - launch or inspect environments
 - create, list, inspect, and remove page agents
 - run arbitrary MCP tools without manually writing JSON-RPC requests
+- configure `OPENAI_API_KEY`, `baseUrl`, and `model` for AI-powered PageAgent proposals
+
+The UI is intentionally split into two layers:
+
+- MCP layer:
+  - environment management
+  - generic tool execution
+  - low-level browser controls
+- PageAgent layer:
+  - page agent state
+  - last proposal
+  - history and execution trail
+
+This keeps the boundary clear: `PageAgent` is an AI-agent layer built on top of MCP browser tools, not a replacement for them.
 
 Open it in your browser after startup:
 
@@ -227,8 +241,9 @@ Planned MCP surface for the first PageAgent iteration:
 - `browser_create_page_agent`
 - `browser_list_page_agents`
 - `browser_get_page_agent`
+- `browser_run_page_agent_step`
+- `browser_apply_page_agent_proposal`
 - `browser_remove_page_agent`
-- `browser_run_page_agent_step` (planned next)
 
 Implementation plan:
 
@@ -241,6 +256,11 @@ Current status:
 
 - Internal page runtime refactor has started
 - First PageAgent registry tools are available
+- Single-step PageAgent observation is available
+- Single-step next action proposals are available
+- PageAgent proposals can now be applied in a controlled way
+- The next refinement is making proposals more concrete by extracting candidate refs from page snapshots
+- Click-oriented proposals can now target concrete refs from the page snapshot
 - Autonomous loops are not implemented yet
 
 The current recommendation is to keep `PageAgent` as an AI-agent concept while continuing to expose browser-native concepts like `tab` and `page` in the public MCP API where possible.

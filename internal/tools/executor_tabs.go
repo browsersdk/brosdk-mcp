@@ -145,6 +145,9 @@ func (e *Executor) resolveTargetID(ctx context.Context, args map[string]any) (st
 }
 
 func (e *Executor) activateAndConnect(ctx context.Context, targetID string) error {
+	if e.browserClient == nil {
+		return fmt.Errorf("no active browser environment")
+	}
 	if err := e.browserClient.ActivateTarget(ctx, targetID); err != nil {
 		return fmt.Errorf("Target.activateTarget failed: %w", err)
 	}
@@ -152,6 +155,9 @@ func (e *Executor) activateAndConnect(ctx context.Context, targetID string) erro
 }
 
 func (e *Executor) connectToTab(ctx context.Context, targetID string) error {
+	if e.browserClient == nil {
+		return fmt.Errorf("no active browser environment")
+	}
 	newPageClient, err := e.browserClient.AttachToTarget(ctx, targetID)
 	if err != nil {
 		return err
@@ -212,10 +218,14 @@ func (e *Executor) getCurrentPageClient(ctx context.Context) (*cdp.Client, strin
 	e.mu.Lock()
 	client := e.pageClient
 	tabID := e.currentTabID
+	browserClient := e.browserClient
 	e.mu.Unlock()
 
 	if client != nil && strings.TrimSpace(tabID) != "" {
 		return client, tabID, nil
+	}
+	if browserClient == nil {
+		return nil, "", fmt.Errorf("no active browser environment")
 	}
 
 	initialTabID, err := e.ensureInitialTab(ctx)

@@ -67,6 +67,10 @@ func NewHandler(router *Router, exec ToolExecutor, serverName, serverVersion str
 	}
 }
 
+func (h *Handler) Executor() ToolExecutor {
+	return h.exec
+}
+
 func IsNotification(req Request) bool {
 	return len(bytes.TrimSpace(req.ID)) == 0
 }
