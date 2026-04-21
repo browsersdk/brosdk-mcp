@@ -262,7 +262,8 @@ Current status:
 - PageAgent proposals can now be applied in a controlled way
 - The next refinement is making proposals more concrete by extracting candidate refs from page snapshots
 - Click-oriented proposals can now target concrete refs from the page snapshot
-- A controlled `maxSteps` PageAgent loop is now available for multi-step testing
+- Input-oriented proposals can now target concrete textbox refs and progress through simple login/search flows
+- A controlled `browser_run_page_agent_loop` is now available for multi-step testing, including `maxSteps`, `maxErrors`, `requireAI`, `stopWhenText`, and `stopOnTool`
 - Autonomous loops are not implemented yet
 
 The current recommendation is to keep `PageAgent` as an AI-agent concept while continuing to expose browser-native concepts like `tab` and `page` in the public MCP API where possible.

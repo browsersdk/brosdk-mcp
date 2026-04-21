@@ -193,13 +193,70 @@ func TestProposeNextActionUsesTextboxRefForInputGoal(t *testing.T) {
 	}
 }
 
+func TestProposeNextActionUsesEmailFieldForLoginGoal(t *testing.T) {
+	snapshot := strings.Join([]string{
+		`- document "Login"`,
+		`  - textbox "Email" [ref=e1]`,
+		`  - textbox "Password" [ref=e2]`,
+		`  - button "Sign In" [ref=e3]`,
+	}, "\n")
+	proposal := proposeNextAction(`log in with email "qa@example.com" and password "secret123"`, "page text", snapshot)
+	if proposal["tool"] != "browser_type_by_ref" {
+		t.Fatalf("expected browser_type_by_ref proposal, got %#v", proposal)
+	}
+	args, _ := proposal["arguments"].(map[string]any)
+	if args["ref"] != "e1" {
+		t.Fatalf("expected email ref e1, got %#v", proposal)
+	}
+	if args["text"] != "qa@example.com" {
+		t.Fatalf("expected email text qa@example.com, got %#v", proposal)
+	}
+}
+
+func TestProposeNextActionFromContextUsesPasswordFieldAfterEmail(t *testing.T) {
+	snapshot := strings.Join([]string{
+		`- document "Login"`,
+		`  - textbox "Email" [ref=e1]`,
+		`  - textbox "Password" [ref=e2]`,
+		`  - button "Sign In" [ref=e3]`,
+	}, "\n")
+	proposal := proposeNextActionFromContext(`log in with email "qa@example.com" and password "secret123"`, "page text", snapshot, "browser_type_by_ref", map[string]any{"ref": "e1"})
+	if proposal["tool"] != "browser_type_by_ref" {
+		t.Fatalf("expected follow-up typing proposal, got %#v", proposal)
+	}
+	args, _ := proposal["arguments"].(map[string]any)
+	if args["ref"] != "e2" {
+		t.Fatalf("expected password ref e2, got %#v", proposal)
+	}
+	if args["text"] != "secret123" {
+		t.Fatalf("expected password text secret123, got %#v", proposal)
+	}
+}
+
+func TestProposeNextActionFromContextClicksAfterPassword(t *testing.T) {
+	snapshot := strings.Join([]string{
+		`- document "Login"`,
+		`  - textbox "Email" [ref=e1]`,
+		`  - textbox "Password" [ref=e2]`,
+		`  - button "Sign In" [ref=e3]`,
+	}, "\n")
+	proposal := proposeNextActionFromContext(`log in with email "qa@example.com" and password "secret123"`, "page text", snapshot, "browser_type_by_ref", map[string]any{"ref": "e2"})
+	if proposal["tool"] != "browser_click_by_ref" {
+		t.Fatalf("expected follow-up click proposal after password entry, got %#v", proposal)
+	}
+	args, _ := proposal["arguments"].(map[string]any)
+	if args["ref"] != "e3" {
+		t.Fatalf("expected sign-in ref e3, got %#v", proposal)
+	}
+}
+
 func TestProposeNextActionFromContextPrefersClickAfterTyping(t *testing.T) {
 	snapshot := strings.Join([]string{
 		`- document "Search"`,
 		`  - textbox "Search" [ref=e3]`,
 		`  - button "Search" [ref=e4]`,
 	}, "\n")
-	proposal := proposeNextActionFromContext(`search for "browser sdk"`, "page text", snapshot, "browser_type_by_ref")
+	proposal := proposeNextActionFromContext(`search for "browser sdk"`, "page text", snapshot, "browser_type_by_ref", map[string]any{"ref": "e3"})
 	if proposal["tool"] != "browser_click_by_ref" {
 		t.Fatalf("expected follow-up click proposal, got %#v", proposal)
 	}
@@ -282,5 +339,57 @@ func TestRunPageAgentLoopRequiresAgent(t *testing.T) {
 	e := &Executor{pageAgents: map[string]*pageAgent{}}
 	if _, err := e.callRunPageAgentLoop(context.Background(), map[string]any{"agentId": "missing"}); err == nil {
 		t.Fatal("expected missing agent error")
+	}
+}
+
+func TestRunPageAgentLoopRejectsInvalidRequireAIArg(t *testing.T) {
+	e := &Executor{
+		pageAgents: map[string]*pageAgent{
+			"page-agent-1": {ID: "page-agent-1"},
+		},
+	}
+	if _, err := e.callRunPageAgentLoop(context.Background(), map[string]any{
+		"agentId":   "page-agent-1",
+		"requireAI": "yes",
+	}); err == nil {
+		t.Fatal("expected requireAI type validation error")
+	}
+}
+
+func TestRunPageAgentLoopRecordsStepErrors(t *testing.T) {
+	e := &Executor{
+		pageAgents: map[string]*pageAgent{
+			"page-agent-1": {
+				ID:              "page-agent-1",
+				Name:            "agent",
+				Goal:            "inspect page",
+				Status:          "idle",
+				EnvironmentName: "missing",
+				TabID:           "tab-a",
+			},
+		},
+		environments: map[string]*browserEnvironment{},
+	}
+
+	got, err := e.callRunPageAgentLoop(context.Background(), map[string]any{
+		"agentId":   "page-agent-1",
+		"maxSteps":  3,
+		"maxErrors": 2,
+	})
+	if err != nil {
+		t.Fatalf("callRunPageAgentLoop returned error: %v", err)
+	}
+	if got["stopReason"] != "max_errors_reached" {
+		t.Fatalf("expected max_errors_reached, got %#v", got)
+	}
+	if got["errorCount"] != 2 {
+		t.Fatalf("expected errorCount=2, got %#v", got)
+	}
+	steps, _ := got["steps"].([]map[string]any)
+	if len(steps) != 2 {
+		t.Fatalf("expected two recorded step errors, got %#v", got)
+	}
+	if steps[0]["phase"] != "step_error" {
+		t.Fatalf("expected first phase step_error, got %#v", steps[0])
 	}
 }

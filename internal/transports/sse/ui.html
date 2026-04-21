@@ -349,6 +349,30 @@
         <label for="manage-agent-id">Agent ID</label>
         <input id="manage-agent-id" placeholder="page-agent-1">
 
+        <div class="tool-grid">
+          <div>
+            <label for="loop-max-steps">Loop maxSteps</label>
+            <input id="loop-max-steps" type="number" min="1" max="20" value="3">
+          </div>
+          <div>
+            <label for="loop-max-errors">Loop maxErrors</label>
+            <input id="loop-max-errors" type="number" min="1" max="20" value="1">
+          </div>
+          <div>
+            <label for="loop-require-ai">Loop requireAI</label>
+            <select id="loop-require-ai">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="loop-stop-text">Loop stopWhenText</label>
+        <input id="loop-stop-text" placeholder="optional text stop condition">
+
+        <label for="loop-stop-tool">Loop stopOnTool</label>
+        <input id="loop-stop-tool" placeholder="optional tool name such as browser_click_by_ref">
+
         <div class="actions">
           <button class="secondary" id="get-agent-btn">Get PageAgent</button>
           <button id="step-agent-btn">Run Step</button>
@@ -440,6 +464,11 @@
       agentTab: document.getElementById('agent-tab'),
       agentEnv: document.getElementById('agent-env'),
       manageAgentId: document.getElementById('manage-agent-id'),
+      loopMaxSteps: document.getElementById('loop-max-steps'),
+      loopMaxErrors: document.getElementById('loop-max-errors'),
+      loopRequireAI: document.getElementById('loop-require-ai'),
+      loopStopText: document.getElementById('loop-stop-text'),
+      loopStopTool: document.getElementById('loop-stop-tool'),
       agentStateId: document.getElementById('agent-state-id'),
       agentStateSummary: document.getElementById('agent-state-summary'),
       proposalPanel: document.getElementById('proposal-panel'),
@@ -772,8 +801,12 @@
       try {
         await runNamedTool('browser_run_page_agent_loop', {
           agentId: els.manageAgentId.value.trim(),
-          maxSteps: 3,
+          maxSteps: Number(els.loopMaxSteps.value || 3),
+          maxErrors: Number(els.loopMaxErrors.value || 1),
           maxChars: 2000,
+          requireAI: els.loopRequireAI.value === 'true',
+          stopWhenText: els.loopStopText.value.trim() || undefined,
+          stopOnTool: els.loopStopTool.value.trim() || undefined,
         });
       } catch (err) {
         appendOutput('browser_run_page_agent_loop error', String(err));

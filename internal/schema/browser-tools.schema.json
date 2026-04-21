@@ -129,7 +129,26 @@
                                                                               "minimum":  1,
                                                                               "maximum":  1000000,
                                                                               "default":  2000
-                                                                          }
+                                                                          },
+                                                             "maxErrors":  {
+                                                                               "type":  "integer",
+                                                                               "minimum":  1,
+                                                                               "maximum":  20,
+                                                                               "default":  1
+                                                                           },
+                                                             "requireAI":  {
+                                                                               "type":  "boolean",
+                                                                               "default":  false,
+                                                                               "description":  "When true, stop if a proposal falls back to rules instead of AI."
+                                                                           },
+                                                             "stopWhenText":  {
+                                                                                    "type":  "string",
+                                                                                    "description":  "Stop the loop when page text or post-action text contains this substring."
+                                                                                },
+                                                             "stopOnTool":  {
+                                                                                "type":  "string",
+                                                                                "description":  "Stop the loop once this tool is applied."
+                                                                            }
                                                          },
                                           "required":  [
                                                            "agentId"

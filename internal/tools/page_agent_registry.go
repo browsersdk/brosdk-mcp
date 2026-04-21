@@ -4,12 +4,23 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
 
 var pageAgentSnapshotRefPattern = regexp.MustCompile(`- ([^"]+?) "([^"]*)" \[ref=(e[0-9]+)\]`)
 var quotedValuePattern = regexp.MustCompile(`"([^"]+)"|'([^']+)'`)
+var pageAgentFieldValuePatterns = map[string]*regexp.Regexp{
+	"email":    regexp.MustCompile(`(?i)\bemail(?: address)?(?:\s+is|\s+as|\s+to|=|:)?\s*("([^"]+)"|'([^']+)'|([^\s,;]+))`),
+	"password": regexp.MustCompile(`(?i)\bpassword(?:\s+is|\s+as|\s+to|=|:)?\s*("([^"]+)"|'([^']+)'|([^\s,;]+))`),
+	"username": regexp.MustCompile(`(?i)\b(?:username|user name|user id|login)(?:\s+is|\s+as|\s+to|=|:)?\s*("([^"]+)"|'([^']+)'|([^\s,;]+))`),
+}
+var pageAgentFieldAliases = map[string][]string{
+	"email":    {"email", "e-mail", "email address"},
+	"password": {"password", "passcode", "pwd"},
+	"username": {"username", "user name", "user id", "login"},
+}
 
 type pageAgent struct {
 	ID              string
@@ -122,6 +133,12 @@ type snapshotRefCandidate struct {
 	Role string
 	Name string
 	Ref  string
+}
+
+type structuredInputCandidate struct {
+	Field string
+	Value string
+	Node  snapshotRefCandidate
 }
 
 func parseSnapshotRefCandidates(snapshot string) []snapshotRefCandidate {
@@ -313,6 +330,169 @@ func findTextboxCandidate(goal string, candidates []snapshotRefCandidate) *snaps
 	return nil
 }
 
+func extractFieldValue(goal string, field string) string {
+	pattern := pageAgentFieldValuePatterns[field]
+	if pattern == nil {
+		return ""
+	}
+	matches := pattern.FindStringSubmatch(strings.TrimSpace(goal))
+	if len(matches) == 0 {
+		return ""
+	}
+	for _, value := range matches[2:] {
+		value = strings.TrimSpace(strings.Trim(value, `"'.,:;!?`))
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func extractStructuredInputValues(goal string) map[string]string {
+	values := map[string]string{}
+	for field := range pageAgentFieldValuePatterns {
+		if value := extractFieldValue(goal, field); value != "" {
+			values[field] = value
+		}
+	}
+	return values
+}
+
+func structuredFieldOrder(goal string, values map[string]string) []string {
+	type fieldPos struct {
+		Field string
+		Pos   int
+	}
+	goal = strings.ToLower(strings.TrimSpace(goal))
+	positions := make([]fieldPos, 0, len(values))
+	for field := range values {
+		pos := len(goal) + 100
+		for _, alias := range pageAgentFieldAliases[field] {
+			if idx := strings.Index(goal, alias); idx >= 0 && idx < pos {
+				pos = idx
+			}
+		}
+		positions = append(positions, fieldPos{Field: field, Pos: pos})
+	}
+	sort.SliceStable(positions, func(i, j int) bool {
+		if positions[i].Pos == positions[j].Pos {
+			return positions[i].Field < positions[j].Field
+		}
+		return positions[i].Pos < positions[j].Pos
+	})
+	out := make([]string, 0, len(positions))
+	for _, item := range positions {
+		out = append(out, item.Field)
+	}
+	return out
+}
+
+func detectCandidateField(candidate snapshotRefCandidate) string {
+	name := strings.ToLower(strings.TrimSpace(candidate.Name))
+	for field, aliases := range pageAgentFieldAliases {
+		for _, alias := range aliases {
+			if strings.Contains(name, alias) {
+				return field
+			}
+		}
+	}
+	return ""
+}
+
+func resolveStructuredFieldByRef(candidates []snapshotRefCandidate, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	for _, candidate := range candidates {
+		if candidate.Ref != ref {
+			continue
+		}
+		if field := detectCandidateField(candidate); field != "" {
+			return field
+		}
+	}
+	return ""
+}
+
+func findStructuredInputCandidateForField(goal string, candidates []snapshotRefCandidate, field string, value string, excludeRef string) *structuredInputCandidate {
+	if len(candidates) == 0 || strings.TrimSpace(field) == "" || strings.TrimSpace(value) == "" {
+		return nil
+	}
+	lowerGoal := strings.ToLower(strings.TrimSpace(goal))
+	var best *snapshotRefCandidate
+	bestScore := 0
+
+	for _, candidate := range candidates {
+		if candidate.Ref == excludeRef {
+			continue
+		}
+		role := strings.ToLower(strings.TrimSpace(candidate.Role))
+		if role != "textbox" && role != "searchbox" && role != "combobox" {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(candidate.Name))
+		score := 1
+		switch field {
+		case "password":
+			if role == "searchbox" {
+				score = -1
+			}
+		case "email", "username":
+			if role == "searchbox" {
+				score = -1
+			}
+		}
+		if score < 0 {
+			continue
+		}
+		for _, alias := range pageAgentFieldAliases[field] {
+			if strings.Contains(name, alias) {
+				score += 5
+			}
+			if strings.Contains(lowerGoal, alias) && strings.Contains(name, alias) {
+				score += 2
+			}
+		}
+		if field == "email" && strings.Contains(value, "@") {
+			score += 1
+		}
+		if field == "password" && strings.Contains(name, "password") {
+			score += 2
+		}
+		if best == nil || score > bestScore {
+			c := candidate
+			best = &c
+			bestScore = score
+		}
+	}
+
+	if best == nil {
+		return nil
+	}
+	return &structuredInputCandidate{
+		Field: field,
+		Value: value,
+		Node:  *best,
+	}
+}
+
+func findStructuredInputCandidate(goal string, candidates []snapshotRefCandidate, values map[string]string, excludeRef string, orderedFields []string) *structuredInputCandidate {
+	if len(candidates) == 0 || len(values) == 0 {
+		return nil
+	}
+	for _, field := range orderedFields {
+		value := values[field]
+		if value == "" {
+			continue
+		}
+		if candidate := findStructuredInputCandidateForField(goal, candidates, field, value, excludeRef); candidate != nil {
+			return candidate
+		}
+	}
+	return nil
+}
+
 func extractInputText(goal string) string {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
@@ -348,12 +528,14 @@ func extractInputText(goal string) string {
 	return ""
 }
 
-func proposeNextActionFromContext(goal string, text string, snapshot string, lastTool string) map[string]any {
+func proposeNextActionFromContext(goal string, text string, snapshot string, lastTool string, lastArgs map[string]any) map[string]any {
 	normalizedGoal := strings.ToLower(strings.TrimSpace(goal))
 	normalizedText := strings.TrimSpace(text)
 	normalizedSnapshot := strings.TrimSpace(snapshot)
 	normalizedLastTool := strings.TrimSpace(lastTool)
 	candidates := parseSnapshotRefCandidates(snapshot)
+	structuredValues := extractStructuredInputValues(goal)
+	lastRef, _ := lastArgs["ref"].(string)
 
 	if normalizedText == "" && normalizedSnapshot == "" {
 		return map[string]any{
@@ -366,6 +548,37 @@ func proposeNextActionFromContext(goal string, text string, snapshot string, las
 	}
 
 	if normalizedLastTool == "browser_type_by_ref" || normalizedLastTool == "browser_set_input_value_by_ref" || normalizedLastTool == "browser_type" || normalizedLastTool == "browser_set_input_value" {
+		fieldOrder := structuredFieldOrder(goal, structuredValues)
+		currentField := resolveStructuredFieldByRef(candidates, lastRef)
+		remainingFields := make([]string, 0, len(fieldOrder))
+		if currentField != "" {
+			include := false
+			for _, field := range fieldOrder {
+				if include {
+					remainingFields = append(remainingFields, field)
+				}
+				if field == currentField {
+					include = true
+				}
+			}
+		} else {
+			remainingFields = fieldOrder
+		}
+		if structured := findStructuredInputCandidate(goal, candidates, structuredValues, strings.TrimSpace(lastRef), remainingFields); structured != nil {
+			return map[string]any{
+				"type":       "tool",
+				"tool":       "browser_type_by_ref",
+				"arguments":  map[string]any{"ref": structured.Node.Ref, "text": structured.Value, "clear": true},
+				"reason":     fmt.Sprintf("The goal includes a %s value and the snapshot contains a likely %s field named %q that has not been filled yet.", structured.Field, structured.Node.Role, structured.Node.Name),
+				"confidence": "medium",
+				"target": map[string]any{
+					"ref":   structured.Node.Ref,
+					"role":  structured.Node.Role,
+					"name":  structured.Node.Name,
+					"field": structured.Field,
+				},
+			}
+		}
 		if candidate := findPostInputClickCandidate(goal, candidates); candidate != nil {
 			return map[string]any{
 				"type":       "tool",
@@ -402,7 +615,22 @@ func proposeNextActionFromContext(goal string, text string, snapshot string, las
 		}
 	}
 
-	if strings.Contains(normalizedGoal, "search") || strings.Contains(normalizedGoal, "input") || strings.Contains(normalizedGoal, "enter") || strings.Contains(normalizedGoal, "fill") || strings.Contains(normalizedGoal, "type ") {
+	if len(structuredValues) > 0 || strings.Contains(normalizedGoal, "search") || strings.Contains(normalizedGoal, "input") || strings.Contains(normalizedGoal, "enter") || strings.Contains(normalizedGoal, "fill") || strings.Contains(normalizedGoal, "type ") {
+		if structured := findStructuredInputCandidate(goal, candidates, structuredValues, "", structuredFieldOrder(goal, structuredValues)); structured != nil {
+			return map[string]any{
+				"type":       "tool",
+				"tool":       "browser_type_by_ref",
+				"arguments":  map[string]any{"ref": structured.Node.Ref, "text": structured.Value, "clear": true},
+				"reason":     fmt.Sprintf("The goal includes a %s value and the snapshot contains a likely %s field named %q.", structured.Field, structured.Node.Role, structured.Node.Name),
+				"confidence": "medium",
+				"target": map[string]any{
+					"ref":   structured.Node.Ref,
+					"role":  structured.Node.Role,
+					"name":  structured.Node.Name,
+					"field": structured.Field,
+				},
+			}
+		}
 		if candidate := findTextboxCandidate(goal, candidates); candidate != nil {
 			inputText := extractInputText(goal)
 			args := map[string]any{"ref": candidate.Ref}
@@ -461,7 +689,7 @@ func proposeNextActionFromContext(goal string, text string, snapshot string, las
 }
 
 func proposeNextAction(goal string, text string, snapshot string) map[string]any {
-	return proposeNextActionFromContext(goal, text, snapshot, "")
+	return proposeNextActionFromContext(goal, text, snapshot, "", nil)
 }
 
 func (e *Executor) pageRuntimeForAgentLocked(agent *pageAgent) *pageRuntime {
@@ -803,7 +1031,7 @@ func (e *Executor) callApplyPageAgentProposal(ctx context.Context, args map[stri
 				if aiErr == nil {
 					nextProposal = aiProposal
 				} else {
-					nextProposal = proposeNextActionFromContext(bound.Goal, text, snapshot, toolName)
+					nextProposal = proposeNextActionFromContext(bound.Goal, text, snapshot, toolName, toolArgs)
 					nextProposalSource = "rules"
 				}
 				applyResult["nextActionProposal"] = nextProposal
@@ -884,9 +1112,24 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 	if maxChars <= 0 {
 		maxChars = 2000
 	}
+	maxErrors := getIntArgDefault(args, "maxErrors", 1)
+	if maxErrors < 1 {
+		maxErrors = 1
+	}
+	requireAI := false
+	if v, ok, err := getBoolArg(args, "requireAI"); err == nil && ok {
+		requireAI = v
+	} else if err != nil {
+		return nil, err
+	}
+	stopWhenText, _ := getStringArg(args, "stopWhenText")
+	stopWhenText = strings.TrimSpace(stopWhenText)
+	stopOnTool, _ := getStringArg(args, "stopOnTool")
+	stopOnTool = strings.TrimSpace(stopOnTool)
 
 	steps := make([]map[string]any, 0, maxSteps)
 	stopReason := "max_steps_reached"
+	errorCount := 0
 
 	for i := 0; i < maxSteps; i++ {
 		stepResult, err := e.callRunPageAgentStep(ctx, map[string]any{
@@ -894,7 +1137,19 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 			"maxChars": maxChars,
 		})
 		if err != nil {
-			return nil, err
+			errorCount++
+			steps = append(steps, map[string]any{
+				"phase": "step_error",
+				"data": map[string]any{
+					"ok":    false,
+					"error": err.Error(),
+				},
+			})
+			if errorCount >= maxErrors {
+				stopReason = "max_errors_reached"
+				break
+			}
+			continue
 		}
 		stepPayload := map[string]any{
 			"phase": "step",
@@ -903,6 +1158,19 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 		steps = append(steps, stepPayload)
 
 		stepBody, _ := stepResult["stepResult"].(map[string]any)
+		if requireAI {
+			if source, _ := stepBody["proposalSource"].(string); source != "ai" {
+				stopReason = "ai_required_but_unavailable"
+				break
+			}
+		}
+		if stopWhenText != "" {
+			text, _ := stepBody["text"].(string)
+			if strings.Contains(text, stopWhenText) {
+				stopReason = "stop_when_text_matched"
+				break
+			}
+		}
 		proposal, _ := stepBody["nextActionProposal"].(map[string]any)
 		if len(proposal) == 0 {
 			stopReason = "no_proposal"
@@ -913,7 +1181,19 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 			"agentId": agentID,
 		})
 		if err != nil {
-			return nil, err
+			errorCount++
+			steps = append(steps, map[string]any{
+				"phase": "apply_error",
+				"data": map[string]any{
+					"ok":    false,
+					"error": err.Error(),
+				},
+			})
+			if errorCount >= maxErrors {
+				stopReason = "max_errors_reached"
+				break
+			}
+			continue
 		}
 		steps = append(steps, map[string]any{
 			"phase": "apply",
@@ -921,6 +1201,24 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 		})
 
 		applyBody, _ := applyResult["applyResult"].(map[string]any)
+		if stopOnTool != "" {
+			if tool, _ := applyBody["tool"].(string); tool == stopOnTool {
+				stopReason = "stop_on_tool_matched"
+				break
+			}
+		}
+		if stopWhenText != "" {
+			if text, _ := applyBody["postActionText"].(string); strings.Contains(text, stopWhenText) {
+				stopReason = "stop_when_text_matched"
+				break
+			}
+		}
+		if requireAI {
+			if src, _ := applyBody["nextActionProposalSource"].(string); src != "" && src != "ai" {
+				stopReason = "ai_required_but_unavailable"
+				break
+			}
+		}
 		nextProposal, _ := applyBody["nextActionProposal"].(map[string]any)
 		if len(nextProposal) == 0 {
 			stopReason = "no_followup_proposal"
@@ -934,11 +1232,16 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 	}
 
 	return map[string]any{
-		"ok":         true,
-		"agentId":    agentID,
-		"maxSteps":   maxSteps,
-		"stopReason": stopReason,
-		"steps":      steps,
-		"agent":      agentResult,
+		"ok":           true,
+		"agentId":      agentID,
+		"maxSteps":     maxSteps,
+		"maxErrors":    maxErrors,
+		"errorCount":   errorCount,
+		"requireAI":    requireAI,
+		"stopWhenText": stopWhenText,
+		"stopOnTool":   stopOnTool,
+		"stopReason":   stopReason,
+		"steps":        steps,
+		"agent":        agentResult,
 	}, nil
 }
