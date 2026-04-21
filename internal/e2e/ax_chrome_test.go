@@ -38,10 +38,7 @@ func TestE2EAXSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chrome: %v", err)
 	}
-	defer func() {
-		_ = chromeCmd.Process.Kill()
-		_, _ = chromeCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome", chromeCmd, 5*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -69,10 +66,7 @@ func TestE2EAXSnapshot(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	// Navigate to fixture and wait for it to be ready.
 	navResult := sendToolsCall(t, stdin, reader, 1, "browser_navigate", map[string]any{"url": fixtureURL})

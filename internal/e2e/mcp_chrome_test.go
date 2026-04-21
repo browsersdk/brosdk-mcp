@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,9 +16,48 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func cleanupProcess(t *testing.T, label string, cmd *exec.Cmd, waitTimeout time.Duration) {
+	t.Helper()
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+
+	proc := cmd.Process
+	pid := proc.Pid
+	exited := make(chan error, 1)
+	go func() {
+		_, err := cmd.Process.Wait()
+		exited <- err
+	}()
+
+	select {
+	case err := <-exited:
+		if err != nil && !errors.Is(err, os.ErrProcessDone) {
+			t.Fatalf("%s process wait failed for pid=%d: %v", label, pid, err)
+		}
+	case <-time.After(waitTimeout):
+		if err := proc.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			t.Fatalf("%s process kill failed for pid=%d: %v", label, pid, err)
+		}
+		select {
+		case err := <-exited:
+			if err != nil && !errors.Is(err, os.ErrProcessDone) {
+				t.Fatalf("%s process wait after kill failed for pid=%d: %v", label, pid, err)
+			}
+		case <-time.After(waitTimeout):
+			t.Fatalf("%s process did not exit after kill within %s (pid=%d path=%q)", label, waitTimeout, pid, cmd.Path)
+		}
+	}
+
+	if err := proc.Signal(os.Signal(syscall.Signal(0))); err == nil {
+		t.Fatalf("%s process still appears alive after cleanup (pid=%d path=%q)", label, pid, cmd.Path)
+	}
+}
 
 func TestE2EChromeNavigateAndAriaSnapshot(t *testing.T) {
 	if os.Getenv("BROSDK_E2E") != "1" {
@@ -34,13 +74,13 @@ func TestE2EChromeNavigateAndAriaSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chrome failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmd.Process.Kill()
-		_, _ = chromeCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome", chromeCmd, 5*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
+
+	fixtureURL, shutdownFixture := startInteractionFixtureServer(t)
+	defer shutdownFixture()
 
 	var mcpStderr bytes.Buffer
 	mcpCmd := exec.CommandContext(
@@ -66,13 +106,10 @@ func TestE2EChromeNavigateAndAriaSnapshot(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp failed: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	navigateResult := sendToolsCall(t, stdin, reader, 1, "browser_navigate", map[string]any{
-		"url": "https://forum.brosdk.com",
+		"url": fixtureURL,
 	})
 	if okValue, ok := navigateResult["ok"].(bool); !ok || !okValue {
 		t.Fatalf("browser_navigate unexpected result: %#v", navigateResult)
@@ -96,7 +133,7 @@ func TestE2EChromeNavigateAndAriaSnapshot(t *testing.T) {
 	}
 
 	waitURLResult := sendToolsCall(t, stdin, reader, 4, "browser_wait_for_url", map[string]any{
-		"url":       "*forum.brosdk.com*",
+		"url":       "*interaction*",
 		"timeoutMs": 30000,
 	})
 	if okValue, ok := waitURLResult["ok"].(bool); !ok || !okValue {
@@ -107,8 +144,8 @@ func TestE2EChromeNavigateAndAriaSnapshot(t *testing.T) {
 		"maxChars": 1000,
 	})
 	pageText, ok := getTextResult["text"].(string)
-	if !ok || strings.TrimSpace(pageText) == "" {
-		t.Fatalf("browser_get_text returned empty text: %#v", getTextResult)
+	if !ok || !strings.Contains(pageText, "Interaction Fixture") {
+		t.Fatalf("browser_get_text returned unexpected text: %#v", getTextResult)
 	}
 
 	snapshotResult := sendToolsCall(t, stdin, reader, 6, "browser_aria_snapshot", map[string]any{})
@@ -141,13 +178,13 @@ func TestE2EChromeNavigateAndAriaSnapshotSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chrome failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmd.Process.Kill()
-		_, _ = chromeCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome", chromeCmd, 5*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
+
+	fixtureURL, shutdownFixture := startInteractionFixtureServer(t)
+	defer shutdownFixture()
 
 	ssePort := findFreeTCPPort(t)
 	messageEndpoint := fmt.Sprintf("http://127.0.0.1:%d/message", ssePort)
@@ -168,13 +205,10 @@ func TestE2EChromeNavigateAndAriaSnapshotSSE(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp failed: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	navigateResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 1, "browser_navigate", map[string]any{
-		"url": "https://forum.brosdk.com",
+		"url": fixtureURL,
 	})
 	if err != nil {
 		t.Fatalf("browser_navigate via sse failed: %v; mcp stderr=%s", err, mcpStderr.String())
@@ -207,7 +241,7 @@ func TestE2EChromeNavigateAndAriaSnapshotSSE(t *testing.T) {
 	}
 
 	waitURLResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 4, "browser_wait_for_url", map[string]any{
-		"url":       "*forum.brosdk.com*",
+		"url":       "*interaction*",
 		"timeoutMs": 30000,
 	})
 	if err != nil {
@@ -224,8 +258,8 @@ func TestE2EChromeNavigateAndAriaSnapshotSSE(t *testing.T) {
 		t.Fatalf("browser_get_text via sse failed: %v; mcp stderr=%s", err, mcpStderr.String())
 	}
 	pageText, ok := getTextResult["text"].(string)
-	if !ok || strings.TrimSpace(pageText) == "" {
-		t.Fatalf("browser_get_text returned empty text: %#v", getTextResult)
+	if !ok || !strings.Contains(pageText, "Interaction Fixture") {
+		t.Fatalf("browser_get_text returned unexpected text: %#v", getTextResult)
 	}
 
 	snapshotResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 6, "browser_aria_snapshot", map[string]any{})
@@ -260,10 +294,7 @@ func TestE2EInteractionWorkflowStdio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chrome failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmd.Process.Kill()
-		_, _ = chromeCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome", chromeCmd, 5*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -292,10 +323,7 @@ func TestE2EInteractionWorkflowStdio(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp failed: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	runInteractionWorkflowStdio(t, stdin, reader, fixtureURL)
 }
@@ -318,10 +346,7 @@ func TestE2EInteractionWorkflowSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chrome failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmd.Process.Kill()
-		_, _ = chromeCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome", chromeCmd, 5*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -345,10 +370,7 @@ func TestE2EInteractionWorkflowSSE(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp failed: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	runInteractionWorkflowSSE(t, ctx, messageEndpoint, fixtureURL)
 }
@@ -379,19 +401,13 @@ func TestE2EMultiEnvironmentWorkflowStdio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chrome A failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmdA.Process.Kill()
-		_, _ = chromeCmdA.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome-a", chromeCmdA, 5*time.Second)
 
 	chromeCmdB, debugPortB, _, err := startChromeWithDynamicDebugPort(chromePath, tempDirB)
 	if err != nil {
 		t.Fatalf("start chrome B failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmdB.Process.Kill()
-		_, _ = chromeCmdB.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome-b", chromeCmdB, 5*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -420,10 +436,7 @@ func TestE2EMultiEnvironmentWorkflowStdio(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp failed: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	addEnvResult := sendToolsCall(t, stdin, reader, 9001, "browser_connect_environment", map[string]any{
 		"name":         "second",
@@ -516,19 +529,13 @@ func TestE2EMultiEnvironmentWorkflowSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chrome A failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmdA.Process.Kill()
-		_, _ = chromeCmdA.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome-a", chromeCmdA, 5*time.Second)
 
 	chromeCmdB, debugPortB, _, err := startChromeWithDynamicDebugPort(chromePath, tempDirB)
 	if err != nil {
 		t.Fatalf("start chrome B failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmdB.Process.Kill()
-		_, _ = chromeCmdB.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome-b", chromeCmdB, 5*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -552,10 +559,7 @@ func TestE2EMultiEnvironmentWorkflowSSE(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp failed: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	addEnvResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9101, "browser_connect_environment", map[string]any{
 		"name":         "second",
@@ -689,10 +693,7 @@ func TestE2ELaunchLocalEnvironmentStdio(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp failed: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	launchResult := sendToolsCall(t, stdin, reader, 9501, "browser_launch_environment", map[string]any{
 		"executable_path": chromePath,
@@ -727,6 +728,430 @@ func TestE2ELaunchLocalEnvironmentStdio(t *testing.T) {
 	}
 }
 
+func TestE2EPageAgentRuleEngineWorkflowSSE(t *testing.T) {
+	if os.Getenv("BROSDK_E2E") != "1" {
+		t.Skip("set BROSDK_E2E=1 to run e2e test")
+	}
+
+	chromePath, ok := findChromeExecutable()
+	if !ok {
+		t.Skip("chrome executable not found")
+	}
+
+	fixtureURL, shutdownFixture := startInteractionFixtureServer(t)
+	defer shutdownFixture()
+
+	tempDir := t.TempDir()
+	chromeCmd, debugPort, _, err := startChromeWithDynamicDebugPort(chromePath, tempDir)
+	if err != nil {
+		t.Fatalf("start chrome failed: %v", err)
+	}
+	defer cleanupProcess(t, "chrome", chromeCmd, 5*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	ssePort := findFreeTCPPort(t)
+	messageEndpoint := fmt.Sprintf("http://127.0.0.1:%d/message", ssePort)
+
+	var mcpStderr bytes.Buffer
+	mcpCmd := exec.CommandContext(
+		ctx,
+		"go", "run", "./cmd/brosdk-mcp",
+		"--mode", "sse",
+		"--cdp", fmt.Sprintf("127.0.0.1:%d", debugPort),
+		"--schema", "schemas/browser-tools.schema.json",
+		"--port", strconv.Itoa(ssePort),
+	)
+	mcpCmd.Dir = repoRootFromTest(t)
+	mcpCmd.Stdout = io.Discard
+	mcpCmd.Stderr = &mcpStderr
+
+	if err := mcpCmd.Start(); err != nil {
+		t.Fatalf("start mcp failed: %v", err)
+	}
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
+
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9601, "browser_navigate", map[string]any{"url": fixtureURL}); err != nil {
+		t.Fatalf("navigate failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9602, "browser_wait_for_selector", map[string]any{
+		"selector":  "#nameInput",
+		"state":     "visible",
+		"timeoutMs": 30000,
+	}); err != nil {
+		t.Fatalf("wait_for_selector nameInput failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+
+	createResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9603, "browser_create_page_agent", map[string]any{
+		"goal": `type "Alice" into the Name Input textbox and then click the Submit Form button`,
+	})
+	if err != nil {
+		t.Fatalf("create page agent failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	agentID, _ := createResult["agentId"].(string)
+	if strings.TrimSpace(agentID) == "" {
+		t.Fatalf("expected agentId from create result, got %#v", createResult)
+	}
+
+	stepResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9604, "browser_run_page_agent_step", map[string]any{
+		"agentId":  agentID,
+		"maxChars": 2000,
+	})
+	if err != nil {
+		t.Fatalf("run page agent step failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	stepPayload, _ := stepResult["stepResult"].(map[string]any)
+	if stepPayload == nil {
+		t.Fatalf("missing stepResult payload: %#v", stepResult)
+	}
+	if src, _ := stepPayload["proposalSource"].(string); src != "rules" {
+		t.Fatalf("expected rules proposal source, got %#v", stepPayload)
+	}
+	firstProposal, _ := stepPayload["nextActionProposal"].(map[string]any)
+	if firstProposal == nil {
+		t.Fatalf("missing nextActionProposal: %#v", stepPayload)
+	}
+	if tool, _ := firstProposal["tool"].(string); tool != "browser_type_by_ref" {
+		t.Fatalf("expected first rule-engine proposal to type by ref, got %#v", firstProposal)
+	}
+
+	applyOne, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9605, "browser_apply_page_agent_proposal", map[string]any{
+		"agentId": agentID,
+	})
+	if err != nil {
+		t.Fatalf("apply first proposal failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	applyOnePayload, _ := applyOne["applyResult"].(map[string]any)
+	if applyOnePayload == nil {
+		t.Fatalf("missing first applyResult payload: %#v", applyOne)
+	}
+	if src, _ := applyOnePayload["nextActionProposalSource"].(string); src != "rules" {
+		t.Fatalf("expected rules follow-up proposal source, got %#v", applyOnePayload)
+	}
+	nextProposal, _ := applyOnePayload["nextActionProposal"].(map[string]any)
+	if nextProposal == nil {
+		t.Fatalf("missing follow-up proposal after typing: %#v", applyOnePayload)
+	}
+	if tool, _ := nextProposal["tool"].(string); tool != "browser_click_by_ref" {
+		t.Fatalf("expected follow-up click proposal, got %#v", nextProposal)
+	}
+
+	applyTwo, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9606, "browser_apply_page_agent_proposal", map[string]any{
+		"agentId": agentID,
+	})
+	if err != nil {
+		t.Fatalf("apply second proposal failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	applyTwoPayload, _ := applyTwo["applyResult"].(map[string]any)
+	if applyTwoPayload == nil {
+		t.Fatalf("missing second applyResult payload: %#v", applyTwo)
+	}
+	if tool, _ := applyTwoPayload["tool"].(string); tool != "browser_click_by_ref" {
+		t.Fatalf("expected second applied tool to click by ref, got %#v", applyTwoPayload)
+	}
+	if postActionText, _ := applyTwoPayload["postActionText"].(string); !strings.Contains(postActionText, "result:Alice:submit") {
+		t.Fatalf("expected postActionText to reflect Submit result, got %#v", applyTwoPayload)
+	}
+
+	agentResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9608, "browser_get_page_agent", map[string]any{
+		"agentId": agentID,
+	})
+	if err != nil {
+		t.Fatalf("get page agent failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if historyCount, _ := agentResult["historyCount"].(float64); historyCount < 3 {
+		t.Fatalf("expected at least 3 history entries after rule-engine flow, got %#v", agentResult)
+	}
+	if status, _ := agentResult["status"].(string); status != "idle" {
+		t.Fatalf("expected final page agent status idle, got %#v", agentResult)
+	}
+
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9610, "browser_navigate", map[string]any{"url": fixtureURL}); err != nil {
+		t.Fatalf("navigate before structured form flow failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9611, "browser_wait_for_selector", map[string]any{
+		"selector":  "#loginEmail",
+		"state":     "visible",
+		"timeoutMs": 30000,
+	}); err != nil {
+		t.Fatalf("wait_for_selector loginEmail failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+
+	loginAgentResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9612, "browser_create_page_agent", map[string]any{
+		"goal": `log in with email "qa@example.com" and password "secret123"`,
+	})
+	if err != nil {
+		t.Fatalf("create login page agent failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	loginAgentID, _ := loginAgentResult["agentId"].(string)
+	if strings.TrimSpace(loginAgentID) == "" {
+		t.Fatalf("expected login agentId, got %#v", loginAgentResult)
+	}
+
+	loginStep, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9613, "browser_run_page_agent_step", map[string]any{
+		"agentId":  loginAgentID,
+		"maxChars": 2000,
+	})
+	if err != nil {
+		t.Fatalf("run login page agent step failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	loginStepPayload, _ := loginStep["stepResult"].(map[string]any)
+	firstLoginProposal, _ := loginStepPayload["nextActionProposal"].(map[string]any)
+	if src, _ := loginStepPayload["proposalSource"].(string); src != "rules" {
+		t.Fatalf("expected rules source for login step, got %#v", loginStepPayload)
+	}
+	if tool, _ := firstLoginProposal["tool"].(string); tool != "browser_type_by_ref" {
+		t.Fatalf("expected first login proposal to type by ref, got %#v", firstLoginProposal)
+	}
+	firstLoginTarget, _ := firstLoginProposal["target"].(map[string]any)
+	if field, _ := firstLoginTarget["field"].(string); field != "email" {
+		t.Fatalf("expected first login proposal to target email field, got %#v", firstLoginProposal)
+	}
+	if name, _ := firstLoginTarget["name"].(string); !strings.Contains(strings.ToLower(name), "email") {
+		t.Fatalf("expected first login target name to mention email, got %#v", firstLoginProposal)
+	}
+
+	loginApplyOne, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9614, "browser_apply_page_agent_proposal", map[string]any{
+		"agentId": loginAgentID,
+	})
+	if err != nil {
+		t.Fatalf("apply first login proposal failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	loginApplyOnePayload, _ := loginApplyOne["applyResult"].(map[string]any)
+	secondLoginProposal, _ := loginApplyOnePayload["nextActionProposal"].(map[string]any)
+	if src, _ := loginApplyOnePayload["nextActionProposalSource"].(string); src != "rules" {
+		t.Fatalf("expected rules source for second login proposal, got %#v", loginApplyOnePayload)
+	}
+	if tool, _ := secondLoginProposal["tool"].(string); tool != "browser_type_by_ref" {
+		t.Fatalf("expected second login proposal to type by ref, got %#v", secondLoginProposal)
+	}
+	secondLoginTarget, _ := secondLoginProposal["target"].(map[string]any)
+	if field, _ := secondLoginTarget["field"].(string); field != "password" {
+		t.Fatalf("expected second login proposal to target password field, got %#v", secondLoginProposal)
+	}
+	if name, _ := secondLoginTarget["name"].(string); !strings.Contains(strings.ToLower(name), "password") {
+		t.Fatalf("expected second login target name to mention password, got %#v", secondLoginProposal)
+	}
+
+	loginApplyTwo, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9615, "browser_apply_page_agent_proposal", map[string]any{
+		"agentId": loginAgentID,
+	})
+	if err != nil {
+		t.Fatalf("apply second login proposal failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	loginApplyTwoPayload, _ := loginApplyTwo["applyResult"].(map[string]any)
+	thirdLoginProposal, _ := loginApplyTwoPayload["nextActionProposal"].(map[string]any)
+	if src, _ := loginApplyTwoPayload["nextActionProposalSource"].(string); src != "rules" {
+		t.Fatalf("expected rules source for third login proposal, got %#v", loginApplyTwoPayload)
+	}
+	if tool, _ := thirdLoginProposal["tool"].(string); tool != "browser_click_by_ref" {
+		t.Fatalf("expected third login proposal to click by ref, got %#v", thirdLoginProposal)
+	}
+	thirdLoginTarget, _ := thirdLoginProposal["target"].(map[string]any)
+	if name, _ := thirdLoginTarget["name"].(string); !strings.Contains(strings.ToLower(name), "sign in") {
+		t.Fatalf("expected third login target name to mention sign in, got %#v", thirdLoginProposal)
+	}
+
+	loginApplyThree, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9616, "browser_apply_page_agent_proposal", map[string]any{
+		"agentId": loginAgentID,
+	})
+	if err != nil {
+		t.Fatalf("apply third login proposal failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	loginApplyThreePayload, _ := loginApplyThree["applyResult"].(map[string]any)
+	if loginApplyThreePayload == nil {
+		t.Fatalf("missing third login applyResult payload: %#v", loginApplyThree)
+	}
+	if tool, _ := loginApplyThreePayload["tool"].(string); tool != "browser_click_by_ref" {
+		t.Fatalf("expected third applied login tool to click by ref, got %#v", loginApplyThreePayload)
+	}
+	if postActionText, _ := loginApplyThreePayload["postActionText"].(string); !strings.Contains(postActionText, "login:qa@example.com:success") {
+		t.Fatalf("expected login postActionText to reflect successful sign-in, got %#v", loginApplyThreePayload)
+	}
+}
+
+func TestE2EPageAgentControlledLoopSSE(t *testing.T) {
+	if os.Getenv("BROSDK_E2E") != "1" {
+		t.Skip("set BROSDK_E2E=1 to run e2e test")
+	}
+
+	chromePath, ok := findChromeExecutable()
+	if !ok {
+		t.Skip("chrome executable not found")
+	}
+
+	fixtureURL, shutdownFixture := startInteractionFixtureServer(t)
+	defer shutdownFixture()
+
+	tempDir := t.TempDir()
+	chromeCmd, debugPort, _, err := startChromeWithDynamicDebugPort(chromePath, tempDir)
+	if err != nil {
+		t.Fatalf("start chrome failed: %v", err)
+	}
+	defer cleanupProcess(t, "chrome", chromeCmd, 5*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	ssePort := findFreeTCPPort(t)
+	messageEndpoint := fmt.Sprintf("http://127.0.0.1:%d/message", ssePort)
+
+	var mcpStderr bytes.Buffer
+	mcpCmd := exec.CommandContext(
+		ctx,
+		"go", "run", "./cmd/brosdk-mcp",
+		"--mode", "sse",
+		"--cdp", fmt.Sprintf("127.0.0.1:%d", debugPort),
+		"--schema", "schemas/browser-tools.schema.json",
+		"--port", strconv.Itoa(ssePort),
+	)
+	mcpCmd.Dir = repoRootFromTest(t)
+	mcpCmd.Stdout = io.Discard
+	mcpCmd.Stderr = &mcpStderr
+
+	if err := mcpCmd.Start(); err != nil {
+		t.Fatalf("start mcp failed: %v", err)
+	}
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
+
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9651, "browser_navigate", map[string]any{"url": fixtureURL}); err != nil {
+		t.Fatalf("navigate failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9652, "browser_wait_for_selector", map[string]any{
+		"selector":  "#nameInput",
+		"state":     "visible",
+		"timeoutMs": 30000,
+	}); err != nil {
+		t.Fatalf("wait_for_selector nameInput failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+
+	stopTextAgentResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9653, "browser_create_page_agent", map[string]any{
+		"goal": `inspect the interaction fixture`,
+	})
+	if err != nil {
+		t.Fatalf("create stopWhenText page agent failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	stopTextAgentID, _ := stopTextAgentResult["agentId"].(string)
+	if strings.TrimSpace(stopTextAgentID) == "" {
+		t.Fatalf("expected stopWhenText agentId, got %#v", stopTextAgentResult)
+	}
+
+	stopTextLoop, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9654, "browser_run_page_agent_loop", map[string]any{
+		"agentId":      stopTextAgentID,
+		"maxSteps":     3,
+		"maxChars":     2000,
+		"stopWhenText": "Interaction Fixture",
+	})
+	if err != nil {
+		t.Fatalf("run stopWhenText loop failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if reason, _ := stopTextLoop["stopReason"].(string); reason != "stop_when_text_matched" {
+		t.Fatalf("expected stop_when_text_matched, got %#v", stopTextLoop)
+	}
+	if errorCount, _ := stopTextLoop["errorCount"].(float64); errorCount != 0 {
+		t.Fatalf("expected stopWhenText errorCount=0, got %#v", stopTextLoop)
+	}
+	stopTextSteps, _ := stopTextLoop["steps"].([]any)
+	if len(stopTextSteps) != 1 {
+		t.Fatalf("expected exactly one recorded step for stopWhenText, got %#v", stopTextLoop)
+	}
+	stopTextAgent, _ := stopTextLoop["agent"].(map[string]any)
+	if historyCount, _ := stopTextAgent["historyCount"].(float64); historyCount != 1 {
+		t.Fatalf("expected stopWhenText historyCount=1, got %#v", stopTextLoop)
+	}
+
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9655, "browser_navigate", map[string]any{"url": fixtureURL}); err != nil {
+		t.Fatalf("navigate before stopOnTool loop failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	clickAgentResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9656, "browser_create_page_agent", map[string]any{
+		"goal": `click the Apply button`,
+	})
+	if err != nil {
+		t.Fatalf("create stopOnTool page agent failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	clickAgentID, _ := clickAgentResult["agentId"].(string)
+	if strings.TrimSpace(clickAgentID) == "" {
+		t.Fatalf("expected stopOnTool agentId, got %#v", clickAgentResult)
+	}
+
+	stopToolLoop, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9657, "browser_run_page_agent_loop", map[string]any{
+		"agentId":    clickAgentID,
+		"maxSteps":   3,
+		"maxChars":   2000,
+		"stopOnTool": "browser_click_by_ref",
+	})
+	if err != nil {
+		t.Fatalf("run stopOnTool loop failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if reason, _ := stopToolLoop["stopReason"].(string); reason != "stop_on_tool_matched" {
+		t.Fatalf("expected stop_on_tool_matched, got %#v", stopToolLoop)
+	}
+	if errorCount, _ := stopToolLoop["errorCount"].(float64); errorCount != 0 {
+		t.Fatalf("expected stopOnTool errorCount=0, got %#v", stopToolLoop)
+	}
+	stopToolSteps, _ := stopToolLoop["steps"].([]any)
+	if len(stopToolSteps) != 2 {
+		t.Fatalf("expected step+apply entries for stopOnTool, got %#v", stopToolLoop)
+	}
+	stopToolAgent, _ := stopToolLoop["agent"].(map[string]any)
+	if historyCount, _ := stopToolAgent["historyCount"].(float64); historyCount != 2 {
+		t.Fatalf("expected stopOnTool historyCount=2, got %#v", stopToolLoop)
+	}
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9658, "browser_wait_for_text", map[string]any{
+		"text":      "result::apply",
+		"timeoutMs": 30000,
+	}); err != nil {
+		t.Fatalf("wait_for_text stopOnTool result failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+
+	if _, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9659, "browser_navigate", map[string]any{"url": fixtureURL}); err != nil {
+		t.Fatalf("navigate before requireAI loop failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	requireAIAgentResult, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9660, "browser_create_page_agent", map[string]any{
+		"goal": `type "Alice" into the Name Input textbox and then click the Apply button`,
+	})
+	if err != nil {
+		t.Fatalf("create requireAI page agent failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	requireAIAgentID, _ := requireAIAgentResult["agentId"].(string)
+	if strings.TrimSpace(requireAIAgentID) == "" {
+		t.Fatalf("expected requireAI agentId, got %#v", requireAIAgentResult)
+	}
+
+	requireAILoop, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9661, "browser_run_page_agent_loop", map[string]any{
+		"agentId":   requireAIAgentID,
+		"maxSteps":  2,
+		"maxChars":  2000,
+		"requireAI": true,
+	})
+	if err != nil {
+		t.Fatalf("run requireAI loop failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if reason, _ := requireAILoop["stopReason"].(string); reason != "ai_required_but_unavailable" {
+		t.Fatalf("expected ai_required_but_unavailable, got %#v", requireAILoop)
+	}
+	if errorCount, _ := requireAILoop["errorCount"].(float64); errorCount != 0 {
+		t.Fatalf("expected requireAI errorCount=0, got %#v", requireAILoop)
+	}
+	requireAISteps, _ := requireAILoop["steps"].([]any)
+	if len(requireAISteps) != 1 {
+		t.Fatalf("expected requireAI loop to stop after first step without apply, got %#v", requireAILoop)
+	}
+	requireAIAgent, _ := requireAILoop["agent"].(map[string]any)
+	if historyCount, _ := requireAIAgent["historyCount"].(float64); historyCount != 1 {
+		t.Fatalf("expected requireAI historyCount=1, got %#v", requireAILoop)
+	}
+
+	resultText, err := sendToolsCallSSEWithRetry(ctx, messageEndpoint, 9662, "browser_get_text", map[string]any{"selector": "#result"})
+	if err != nil {
+		t.Fatalf("get_text after requireAI loop failed: %v; mcp stderr=%s", err, mcpStderr.String())
+	}
+	if text, _ := resultText["text"].(string); strings.TrimSpace(text) != "result:init" {
+		t.Fatalf("expected requireAI loop to avoid applying actions, got %#v", resultText)
+	}
+}
+
 func TestE2EPageAgentAIWorkflowSSE(t *testing.T) {
 	if os.Getenv("BROSDK_E2E") != "1" {
 		t.Skip("set BROSDK_E2E=1 to run e2e test")
@@ -755,10 +1180,7 @@ func TestE2EPageAgentAIWorkflowSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chrome failed: %v", err)
 	}
-	defer func() {
-		_ = chromeCmd.Process.Kill()
-		_, _ = chromeCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "chrome", chromeCmd, 5*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -783,10 +1205,7 @@ func TestE2EPageAgentAIWorkflowSSE(t *testing.T) {
 	if err := mcpCmd.Start(); err != nil {
 		t.Fatalf("start mcp failed: %v", err)
 	}
-	defer func() {
-		_ = mcpCmd.Process.Kill()
-		_, _ = mcpCmd.Process.Wait()
-	}()
+	defer cleanupProcess(t, "brosdk-mcp", mcpCmd, 5*time.Second)
 
 	if err := postPageAgentAIConfig(ctx, configEndpoint, apiKey, baseURL, model); err != nil {
 		t.Fatalf("configure page agent ai failed: %v", err)
@@ -1049,9 +1468,15 @@ func runInteractionWorkflowStdio(t *testing.T, stdin io.Writer, reader *bufio.Re
 
 	snapshotResult := sendToolsCall(t, stdin, reader, 103, "browser_aria_snapshot", map[string]any{})
 	snapshot, _ := snapshotResult["snapshot"].(string)
-	inputRef := mustExtractRef(t, snapshot, `input "Name Input"`)
+	inputRef := mustExtractRef(t, snapshot, `textbox "Name Input"`)
 	applyRef := mustExtractRef(t, snapshot, `button "Apply"`)
 	shadowRef := mustExtractRef(t, snapshot, `button "Shadow Action"`)
+
+	uploadDir := t.TempDir()
+	uploadPath := filepath.Join(uploadDir, "upload-a.txt")
+	if err := os.WriteFile(uploadPath, []byte("upload-a"), 0o644); err != nil {
+		t.Fatalf("write upload fixture file: %v", err)
+	}
 
 	sendToolsCall(t, stdin, reader, 104, "browser_type", map[string]any{"selector": "#nameInput", "text": "Alice", "clear": true})
 	sendToolsCall(t, stdin, reader, 105, "browser_click", map[string]any{"selector": "#applyBtn"})
@@ -1075,9 +1500,34 @@ func runInteractionWorkflowStdio(t *testing.T, stdin io.Writer, reader *bufio.Re
 	sendToolsCall(t, stdin, reader, 121, "browser_click", map[string]any{"selector": "#shadowBtn"})
 	sendToolsCall(t, stdin, reader, 122, "browser_wait_for_text", map[string]any{"text": "result:Dave:shadow", "timeoutMs": 15000})
 
+	sendToolsCall(t, stdin, reader, 124, "browser_hover", map[string]any{"selector": "#hoverTarget"})
+	sendToolsCall(t, stdin, reader, 125, "browser_wait_for_text", map[string]any{"text": "hovered:hover-target", "timeoutMs": 15000})
+
+	sendToolsCall(t, stdin, reader, 126, "browser_select_option", map[string]any{"selector": "#choiceSelect", "value": "beta"})
+	sendToolsCall(t, stdin, reader, 127, "browser_wait_for_text", map[string]any{"text": "selected:beta", "timeoutMs": 15000})
+
+	sendToolsCall(t, stdin, reader, 128, "browser_set_file_input_files", map[string]any{"selector": "#fileInput", "paths": []string{uploadPath}})
+	sendToolsCall(t, stdin, reader, 129, "browser_wait_for_text", map[string]any{"text": "file:upload-a.txt", "timeoutMs": 15000})
+
+	sendToolsCall(t, stdin, reader, 130, "browser_evaluate", map[string]any{"expression": `setTimeout(function(){ alert('Async hello'); document.getElementById('result').textContent = 'alert:done'; }, 50); true`})
+	waitDialog := sendToolsCall(t, stdin, reader, 131, "browser_wait_for_dialog", map[string]any{"timeoutMs": 15000})
+	if msg, _ := waitDialog["message"].(string); msg != "Async hello" {
+		t.Fatalf("unexpected dialog payload: %#v", waitDialog)
+	}
+	sendToolsCall(t, stdin, reader, 132, "browser_handle_dialog", map[string]any{"accept": true})
+	sendToolsCall(t, stdin, reader, 133, "browser_wait_for_text", map[string]any{"text": "alert:done", "timeoutMs": 15000})
+
+	sendToolsCall(t, stdin, reader, 134, "browser_click", map[string]any{"selector": "#confirmBtn"})
+	sendToolsCall(t, stdin, reader, 135, "browser_handle_dialog", map[string]any{"accept": false, "timeoutMs": 15000})
+	sendToolsCall(t, stdin, reader, 136, "browser_wait_for_text", map[string]any{"text": "confirm:false", "timeoutMs": 15000})
+
+	sendToolsCall(t, stdin, reader, 137, "browser_click", map[string]any{"selector": "#promptBtn"})
+	sendToolsCall(t, stdin, reader, 138, "browser_handle_dialog", map[string]any{"accept": true, "promptText": "typed by mcp", "timeoutMs": 15000})
+	sendToolsCall(t, stdin, reader, 139, "browser_wait_for_text", map[string]any{"text": "prompt:typed by mcp", "timeoutMs": 15000})
+
 	resultText := sendToolsCall(t, stdin, reader, 123, "browser_get_text", map[string]any{"selector": "#result"})
 	text, _ := resultText["text"].(string)
-	if !strings.Contains(text, "result:Dave:shadow") {
+	if !strings.Contains(text, "prompt:typed by mcp") {
 		t.Fatalf("unexpected result text: %q", text)
 	}
 }
@@ -1118,9 +1568,15 @@ func runInteractionWorkflowSSE(t *testing.T, ctx context.Context, endpoint strin
 		t.Fatalf("aria_snapshot failed: %v", err)
 	}
 	snapshot, _ := snapshotResult["snapshot"].(string)
-	inputRef := mustExtractRef(t, snapshot, `input "Name Input"`)
+	inputRef := mustExtractRef(t, snapshot, `textbox "Name Input"`)
 	applyRef := mustExtractRef(t, snapshot, `button "Apply"`)
 	shadowRef := mustExtractRef(t, snapshot, `button "Shadow Action"`)
+
+	uploadDir := t.TempDir()
+	uploadPath := filepath.Join(uploadDir, "upload-b.txt")
+	if err := os.WriteFile(uploadPath, []byte("upload-b"), 0o644); err != nil {
+		t.Fatalf("write upload fixture file: %v", err)
+	}
 
 	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 204, "browser_type", map[string]any{"selector": "#nameInput", "text": "Alice", "clear": true})
 	if err != nil {
@@ -1195,12 +1651,85 @@ func runInteractionWorkflowSSE(t *testing.T, ctx context.Context, endpoint strin
 		t.Fatalf("wait_for_text shadow selector failed: %v", err)
 	}
 
-	resultText, err := sendToolsCallSSEWithRetry(ctx, endpoint, 223, "browser_get_text", map[string]any{"selector": "#result"})
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 224, "browser_hover", map[string]any{"selector": "#hoverTarget"})
+	if err != nil {
+		t.Fatalf("hover failed: %v", err)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 225, "browser_wait_for_text", map[string]any{"text": "hovered:hover-target", "timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("wait_for_text hover failed: %v", err)
+	}
+
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 226, "browser_select_option", map[string]any{"selector": "#choiceSelect", "value": "beta"})
+	if err != nil {
+		t.Fatalf("select_option failed: %v", err)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 227, "browser_wait_for_text", map[string]any{"text": "selected:beta", "timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("wait_for_text select failed: %v", err)
+	}
+
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 228, "browser_set_file_input_files", map[string]any{"selector": "#fileInput", "paths": []string{uploadPath}})
+	if err != nil {
+		t.Fatalf("set_file_input_files failed: %v", err)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 229, "browser_wait_for_text", map[string]any{"text": "file:upload-b.txt", "timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("wait_for_text upload failed: %v", err)
+	}
+
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 230, "browser_evaluate", map[string]any{"expression": `setTimeout(function(){ alert('Async hello'); document.getElementById('result').textContent = 'alert:done'; }, 50); true`})
+	if err != nil {
+		t.Fatalf("schedule alert failed: %v", err)
+	}
+	dialogPayload, err := sendToolsCallSSEWithRetry(ctx, endpoint, 231, "browser_wait_for_dialog", map[string]any{"timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("wait_for_dialog failed: %v", err)
+	}
+	if msg, _ := dialogPayload["message"].(string); msg != "Async hello" {
+		t.Fatalf("unexpected dialog payload: %#v", dialogPayload)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 232, "browser_handle_dialog", map[string]any{"accept": true})
+	if err != nil {
+		t.Fatalf("handle_dialog alert failed: %v", err)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 233, "browser_wait_for_text", map[string]any{"text": "alert:done", "timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("wait_for_text alert failed: %v", err)
+	}
+
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 234, "browser_click", map[string]any{"selector": "#confirmBtn"})
+	if err != nil {
+		t.Fatalf("click confirm failed: %v", err)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 235, "browser_handle_dialog", map[string]any{"accept": false, "timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("handle_dialog confirm failed: %v", err)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 236, "browser_wait_for_text", map[string]any{"text": "confirm:false", "timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("wait_for_text confirm failed: %v", err)
+	}
+
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 237, "browser_click", map[string]any{"selector": "#promptBtn"})
+	if err != nil {
+		t.Fatalf("click prompt failed: %v", err)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 238, "browser_handle_dialog", map[string]any{"accept": true, "promptText": "typed by mcp", "timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("handle_dialog prompt failed: %v", err)
+	}
+	_, err = sendToolsCallSSEWithRetry(ctx, endpoint, 239, "browser_wait_for_text", map[string]any{"text": "prompt:typed by mcp", "timeoutMs": 15000})
+	if err != nil {
+		t.Fatalf("wait_for_text prompt failed: %v", err)
+	}
+
+	resultText, err := sendToolsCallSSEWithRetry(ctx, endpoint, 240, "browser_get_text", map[string]any{"selector": "#result"})
 	if err != nil {
 		t.Fatalf("get_text failed: %v", err)
 	}
 	text, _ := resultText["text"].(string)
-	if !strings.Contains(text, "result:Dave:shadow") {
+	if !strings.Contains(text, "prompt:typed by mcp") {
 		t.Fatalf("unexpected result text: %q", text)
 	}
 }
@@ -1315,8 +1844,24 @@ func startInteractionFixtureServer(t *testing.T) (string, func()) {
 <body>
   <h1>Interaction Fixture</h1>
   <input id="nameInput" aria-label="Name Input" value="" />
+  <section aria-label="Login Form">
+    <label for="loginEmail">Email Address</label>
+    <input id="loginEmail" type="email" aria-label="Email Address" value="" />
+    <label for="loginPassword">Password</label>
+    <input id="loginPassword" type="password" aria-label="Password" value="" />
+    <button id="signInBtn" aria-label="Sign In" onclick="signIn()">Sign In</button>
+  </section>
+  <button id="hoverTarget" aria-label="Hover Target">Hover Target</button>
+  <select id="choiceSelect" aria-label="Choice Select">
+    <option value="alpha">Alpha</option>
+    <option value="beta">Beta</option>
+    <option value="gamma">Gamma</option>
+  </select>
+  <input id="fileInput" type="file" aria-label="Upload File" />
   <button id="applyBtn" onclick="apply('apply')">Apply</button>
   <button id="submitBtn" onclick="apply('submit')">Submit Form</button>
+  <button id="confirmBtn" onclick="setTimeout(function(){ document.getElementById('result').textContent = 'confirm:' + confirm('Please confirm'); }, 0)">Confirm</button>
+  <button id="promptBtn" onclick="setTimeout(function(){ document.getElementById('result').textContent = 'prompt:' + (prompt('Enter prompt', 'seed') || ''); }, 0)">Prompt</button>
   <shadow-action></shadow-action>
   <div id="result">result:init</div>
   <script>
@@ -1324,6 +1869,21 @@ func startInteractionFixtureServer(t *testing.T) (string, func()) {
       const val = document.getElementById('nameInput').value || '';
       document.getElementById('result').textContent = 'result:' + val + ':' + source;
     }
+    function signIn() {
+      const email = document.getElementById('loginEmail').value || '';
+      const password = document.getElementById('loginPassword').value || '';
+      document.getElementById('result').textContent = password ? 'login:' + email + ':success' : 'login:' + email + ':missing-password';
+    }
+    document.getElementById('hoverTarget').addEventListener('mouseenter', () => {
+      document.getElementById('result').textContent = 'hovered:hover-target';
+    });
+    document.getElementById('choiceSelect').addEventListener('change', (event) => {
+      document.getElementById('result').textContent = 'selected:' + event.target.value;
+    });
+    document.getElementById('fileInput').addEventListener('change', (event) => {
+      const names = Array.from(event.target.files || []).map((file) => file.name).join(',');
+      document.getElementById('result').textContent = 'file:' + names;
+    });
     customElements.define('shadow-action', class extends HTMLElement {
       connectedCallback() {
         const root = this.attachShadow({mode: 'open'});

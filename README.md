@@ -8,7 +8,7 @@ The project focuses on reliable page interaction, ARIA-based snapshots, tab mana
 
 - Supports `stdio` and `SSE` transport modes.
 - Can connect to an existing Chrome/Chromium instance via `--remote-debugging-port`.
-- Exposes 39 browser tools through MCP.
+- Exposes 47 browser tools through MCP.
 - Provides ARIA snapshots with `ref` identifiers for follow-up `by_ref` actions.
 - Supports Shadow DOM traversal and frame-aware fallback for ref-based actions.
 - Supports multiple browser environments in one MCP server process.
@@ -21,8 +21,8 @@ Current tools:
 - Agents: `browser_create_page_agent`, `browser_list_page_agents`, `browser_get_page_agent`, `browser_run_page_agent_step`, `browser_run_page_agent_loop`, `browser_apply_page_agent_proposal`, `browser_remove_page_agent`
 - Navigation: `browser_navigate`, `browser_reload`, `browser_go_back`, `browser_go_forward`
 - Inspection: `browser_aria_snapshot`, `browser_screenshot`, `browser_get_text`, `browser_evaluate`
-- Interaction: `browser_click`, `browser_click_by_ref`, `browser_type`, `browser_type_by_ref`, `browser_set_input_value`, `browser_set_input_value_by_ref`, `browser_find_and_click_text`, `browser_press`, `browser_scroll`
-- Waiting: `browser_wait`, `browser_wait_for_selector`, `browser_wait_for_text`, `browser_wait_for_load`, `browser_wait_for_url`, `browser_wait_for_function`
+- Interaction: `browser_click`, `browser_click_by_ref`, `browser_hover`, `browser_hover_by_ref`, `browser_type`, `browser_type_by_ref`, `browser_select_option`, `browser_select_option_by_ref`, `browser_set_input_value`, `browser_set_input_value_by_ref`, `browser_set_file_input_files`, `browser_set_file_input_files_by_ref`, `browser_find_and_click_text`, `browser_handle_dialog`, `browser_press`, `browser_scroll`
+- Waiting: `browser_wait`, `browser_wait_for_selector`, `browser_wait_for_text`, `browser_wait_for_dialog`, `browser_wait_for_load`, `browser_wait_for_url`, `browser_wait_for_function`
 - Tabs: `browser_list_tabs`, `browser_new_tab`, `browser_switch_tab`, `browser_close_tab`
 - Environments: `browser_connect_environment`, `browser_launch_environment`, `browser_list_environments`, `browser_switch_environment`, `browser_close_environment`
 
@@ -30,6 +30,28 @@ The canonical machine-readable registry is:
 
 - `internal/schema/browser-tools.schema.json`
 - `schemas/browser-tools.schema.json`
+
+## Capability Gaps
+
+High priority gaps still worth implementing:
+
+- Network interception and request/response inspection
+- Cookie, localStorage, and sessionStorage management
+- Drag-and-drop and richer pointer gestures
+- Download handling and file chooser lifecycle introspection
+
+Medium priority gaps:
+
+- Viewport/device emulation and geolocation/permissions
+- Console log collection and page error surfacing
+- PDF/print generation and browser-level downloads API
+- Browser history/bookmark/profile management helpers
+
+Lower priority gaps:
+
+- Advanced frame targeting helpers
+- HAR-style tracing and performance/network timelines
+- Visual diffing and snapshot assertions
 
 ## Requirements
 
@@ -260,11 +282,13 @@ Current status:
 - Single-step PageAgent observation is available
 - Single-step next action proposals are available
 - PageAgent proposals can now be applied in a controlled way
-- The next refinement is making proposals more concrete by extracting candidate refs from page snapshots
 - Click-oriented proposals can now target concrete refs from the page snapshot
 - Input-oriented proposals can now target concrete textbox refs and progress through simple login/search flows
 - A controlled `browser_run_page_agent_loop` is now available for multi-step testing, including `maxSteps`, `maxErrors`, `requireAI`, `stopWhenText`, and `stopOnTool`
+- PageAgent E2E coverage now exercises the controlled planning/apply path for both rule-engine proposals and the env-gated AI flow
+- PageAgent E2E coverage now validates controlled loop stop conditions such as `stopWhenText`, `stopOnTool`, and `ai_required_but_unavailable`
 - Autonomous loops are not implemented yet
+- The next major refinement is improving proposal quality beyond simple ref-targeted form flows, especially for richer multi-step page understanding and broader autonomous behavior
 
 The current recommendation is to keep `PageAgent` as an AI-agent concept while continuing to expose browser-native concepts like `tab` and `page` in the public MCP API where possible.
 

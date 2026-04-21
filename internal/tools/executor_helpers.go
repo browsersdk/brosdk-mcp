@@ -280,6 +280,33 @@ func getStringArg(args map[string]any, key string) (string, bool) {
 	return s, true
 }
 
+func getStringSliceArg(args map[string]any, key string) ([]string, bool, error) {
+	v, ok := args[key]
+	if !ok {
+		return nil, false, nil
+	}
+	switch items := v.(type) {
+	case []string:
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			out = append(out, item)
+		}
+		return out, true, nil
+	case []any:
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok {
+				return nil, true, fmt.Errorf("%s must contain only strings", key)
+			}
+			out = append(out, s)
+		}
+		return out, true, nil
+	default:
+		return nil, true, fmt.Errorf("%s must be an array of strings", key)
+	}
+}
+
 func getBoolArg(args map[string]any, key string) (bool, bool, error) {
 	v, ok := args[key]
 	if !ok {

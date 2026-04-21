@@ -133,14 +133,26 @@ func (e *Executor) Call(ctx context.Context, name string, args map[string]any) (
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callClick(ctx, args) })
 	case "browser_click_by_ref":
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callClickByRef(ctx, args) })
+	case "browser_hover":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callHover(ctx, args) })
+	case "browser_hover_by_ref":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callHoverByRef(ctx, args) })
 	case "browser_type":
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callType(ctx, args) })
 	case "browser_type_by_ref":
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callTypeByRef(ctx, args) })
+	case "browser_select_option":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callSelectOption(ctx, args) })
+	case "browser_select_option_by_ref":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callSelectOptionByRef(ctx, args) })
 	case "browser_set_input_value":
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callSetInputValue(ctx, args) })
 	case "browser_set_input_value_by_ref":
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callSetInputValueByRef(ctx, args) })
+	case "browser_set_file_input_files":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callSetFileInputFiles(ctx, args) })
+	case "browser_set_file_input_files_by_ref":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callSetFileInputFilesByRef(ctx, args) })
 	case "browser_find_and_click_text":
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callFindAndClickText(ctx, args) })
 	case "browser_get_text":
@@ -153,6 +165,10 @@ func (e *Executor) Call(ctx context.Context, name string, args map[string]any) (
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callWaitForSelector(ctx, args) })
 	case "browser_wait_for_text":
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callWaitForText(ctx, args) })
+	case "browser_wait_for_dialog":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callWaitForDialog(ctx, args) })
+	case "browser_handle_dialog":
+		return e.withEnvironment(args, func() (map[string]any, error) { return e.callHandleDialog(ctx, args) })
 	case "browser_wait_for_url":
 		return e.withEnvironment(args, func() (map[string]any, error) { return e.callWaitForURL(ctx, args) })
 	case "browser_wait_for_load":
