@@ -151,6 +151,40 @@ func TestUIEndpointServesHTML(t *testing.T) {
 	if !strings.Contains(body, "browser_create_page_agent") {
 		t.Fatalf("expected ui body to reference page agent tools, got %s", body)
 	}
+	if !strings.Contains(body, "Run Search Fixture") {
+		t.Fatalf("expected ui body to contain fixture buttons, got %s", body)
+	}
+}
+
+func TestUIFixtureEndpointServesInteractionFixture(t *testing.T) {
+	srv, endpoints := startTestServer(t)
+	defer shutdownTestServer(t, srv)
+
+	fixtureURL := strings.TrimSuffix(endpoints.UI, "/ui") + "/ui/fixtures/interaction"
+	resp, err := http.Get(fixtureURL)
+	if err != nil {
+		t.Fatalf("get ui fixture endpoint failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected fixture status: %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("unexpected fixture content type: %q", got)
+	}
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read fixture body failed: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "Built-in PageAgent Fixture") {
+		t.Fatalf("expected fixture title in body, got %s", body)
+	}
+	if !strings.Contains(body, "Search Query") || !strings.Contains(body, "Payment Details") || !strings.Contains(body, "loginEmail") {
+		t.Fatalf("expected fixture body to expose search/login/inspect affordances, got %s", body)
+	}
 }
 
 func TestRootRedirectsToUI(t *testing.T) {

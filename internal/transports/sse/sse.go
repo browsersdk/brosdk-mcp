@@ -79,6 +79,7 @@ func (s *Server) Start() (Endpoints, error) {
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/ui", s.handleUI)
 	mux.HandleFunc("/ui/config", s.handleUIConfig)
+	mux.HandleFunc("/ui/fixtures/interaction", s.handleUIFixtureInteraction)
 	mux.HandleFunc("/sse", s.handleSSE)
 	mux.HandleFunc("/message", s.handleMessage)
 	mux.HandleFunc("/session", s.handleSession)

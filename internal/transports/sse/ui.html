@@ -373,6 +373,13 @@
           <button class="ghost" id="list-env-btn">List Environments</button>
         </div>
         <div class="hint">This is the quickest way to get a local browser up and bind it into MCP for PageAgent testing.</div>
+        <label style="margin-top:18px;" for="fixture-search-btn">Built-in fixture buttons</label>
+        <div class="actions">
+          <button class="secondary" id="fixture-search-btn">Run Search Fixture</button>
+          <button class="secondary" id="fixture-login-btn">Run Login Fixture</button>
+          <button class="secondary" id="fixture-inspect-btn">Run Inspect Fixture</button>
+        </div>
+        <div class="hint">Each button launches the local fixture page, waits for the target control, creates a PageAgent, and runs a small loop so we can validate the flow end-to-end.</div>
       </div>
 
       <div class="panel span-4">
@@ -545,6 +552,30 @@
   <script>
     const messageEndpoint = `${location.origin}/message`;
     const sseEndpoint = `${location.origin}/sse`;
+    const fixtureBaseURL = `${location.origin}/ui/fixtures/interaction`;
+    const fixtureScenarios = {
+      search: {
+        label: 'search',
+        url: fixtureBaseURL,
+        goal: 'search for "browser sdk" in the Search Query box and click Search',
+        waitSelector: '#searchQuery',
+        stopWhenText: '',
+      },
+      login: {
+        label: 'login',
+        url: fixtureBaseURL,
+        goal: 'log in with email "qa@example.com" and password "secret123"',
+        waitSelector: '#loginEmail',
+        stopWhenText: '',
+      },
+      inspect: {
+        label: 'inspect',
+        url: fixtureBaseURL,
+        goal: 'inspect the checkout page and stop once the text "Payment Details" is visible',
+        waitSelector: '#paymentDetails',
+        stopWhenText: 'Payment Details',
+      },
+    };
 
     const els = {
       messageEndpoint: document.getElementById('message-endpoint'),
@@ -825,6 +856,19 @@
       return JSON.parse(trimmed);
     }
 
+    function applyFixtureScenarioToForm(scenario) {
+      els.launchUrl.value = scenario.url;
+      els.agentGoal.value = scenario.goal;
+      els.loopStopText.value = scenario.stopWhenText || '';
+      els.loopStopRepeat.value = 'true';
+      els.loopStopNoChange.value = 'true';
+      els.loopMaxSteps.value = scenario.stopWhenText ? '2' : '4';
+      els.loopMaxErrors.value = '1';
+      els.loopMaxChars.value = '2000';
+      els.launchActive.value = 'true';
+      els.agentScenario.value = '';
+    }
+
     async function runNamedTool(name, args) {
       setStatus(`Running ${name}`);
       const result = unwrapToolResult(await callTool(name, args));
@@ -871,6 +915,55 @@
       return result;
     }
 
+    async function runFixtureScenario(kind) {
+      const scenario = fixtureScenarios[kind];
+      if (!scenario) {
+        throw new Error(`unknown fixture scenario: ${kind}`);
+      }
+      applyFixtureScenarioToForm(scenario);
+      setStatus(`Running ${scenario.label} fixture`);
+      appendOutput('fixture scenario', scenario);
+
+      const launchResult = await runNamedTool('browser_launch_environment', {
+        name: undefined,
+        executable_path: els.launchPath.value.trim() || undefined,
+        initial_url: scenario.url,
+        headless: els.launchHeadless.value === 'true',
+        set_active: true,
+      });
+      const environmentName = launchResult.name;
+      if (environmentName) {
+        els.agentEnv.value = environmentName;
+      }
+
+      await runNamedTool('browser_wait_for_selector', {
+        environment: environmentName || undefined,
+        selector: scenario.waitSelector,
+        state: 'visible',
+        timeoutMs: 15000,
+      });
+
+      const agentResult = await runNamedTool('browser_create_page_agent', {
+        goal: scenario.goal,
+        environment: environmentName || els.agentEnv.value.trim() || undefined,
+      });
+      if (agentResult.agentId) {
+        els.manageAgentId.value = agentResult.agentId;
+      }
+
+      await runNamedTool('browser_run_page_agent_loop', {
+        agentId: els.manageAgentId.value.trim(),
+        maxSteps: Number(els.loopMaxSteps.value || 3),
+        maxErrors: Number(els.loopMaxErrors.value || 1),
+        maxChars: Number(els.loopMaxChars.value || 2000),
+        requireAI: els.loopRequireAI.value === 'true',
+        stopOnRepeatedProposal: true,
+        stopOnNoPageChange: true,
+        stopWhenText: scenario.stopWhenText || undefined,
+      });
+      setStatus(`Fixture complete: ${scenario.label}`);
+    }
+
     async function loadAIConfig() {
       const res = await fetch(uiConfigEndpoint);
       const payload = await res.json();
@@ -908,6 +1001,33 @@
       } catch (err) {
         appendOutput('browser_list_environments error', String(err));
         setStatus('List environments failed');
+      }
+    });
+
+    document.getElementById('fixture-search-btn').addEventListener('click', async () => {
+      try {
+        await runFixtureScenario('search');
+      } catch (err) {
+        appendOutput('fixture search error', String(err));
+        setStatus('Search fixture failed');
+      }
+    });
+
+    document.getElementById('fixture-login-btn').addEventListener('click', async () => {
+      try {
+        await runFixtureScenario('login');
+      } catch (err) {
+        appendOutput('fixture login error', String(err));
+        setStatus('Login fixture failed');
+      }
+    });
+
+    document.getElementById('fixture-inspect-btn').addEventListener('click', async () => {
+      try {
+        await runFixtureScenario('inspect');
+      } catch (err) {
+        appendOutput('fixture inspect error', String(err));
+        setStatus('Inspect fixture failed');
       }
     });
 
