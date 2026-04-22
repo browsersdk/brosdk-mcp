@@ -1,11 +1,22 @@
 package tools
 
-import "brosdk-mcp/internal/cdp"
+import (
+	"time"
+
+	"brosdk-mcp/internal/cdp"
+)
 
 type pageRuntime struct {
-	TabID        string
-	PageClient   *cdp.Client
-	AriaRefStore map[string]ariaRefMeta
+	TabID                 string
+	PageClient            *cdp.Client
+	AriaRefStore          map[string]ariaRefMeta
+	LastText              string
+	LastSnapshot          string
+	LastTool              string
+	LastToolArgs          map[string]any
+	LastObservedAt        time.Time
+	PendingProposal       map[string]any
+	PendingProposalSource string
 }
 
 func newPageRuntime(tabID string, pageClient *cdp.Client, ariaRefStore map[string]ariaRefMeta) *pageRuntime {
@@ -21,9 +32,16 @@ func clonePageRuntime(src *pageRuntime) *pageRuntime {
 		return nil
 	}
 	return &pageRuntime{
-		TabID:        src.TabID,
-		PageClient:   src.PageClient,
-		AriaRefStore: cloneAriaRefMetaMap(src.AriaRefStore),
+		TabID:                 src.TabID,
+		PageClient:            src.PageClient,
+		AriaRefStore:          cloneAriaRefMetaMap(src.AriaRefStore),
+		LastText:              src.LastText,
+		LastSnapshot:          src.LastSnapshot,
+		LastTool:              src.LastTool,
+		LastToolArgs:          cloneMap(src.LastToolArgs),
+		LastObservedAt:        src.LastObservedAt,
+		PendingProposal:       cloneMap(src.PendingProposal),
+		PendingProposalSource: src.PendingProposalSource,
 	}
 }
 
@@ -34,6 +52,17 @@ func cloneAriaRefMetaMap(src map[string]ariaRefMeta) map[string]ariaRefMeta {
 	out := make(map[string]ariaRefMeta, len(src))
 	for ref, meta := range src {
 		out[ref] = meta
+	}
+	return out
+}
+
+func cloneMap(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string]any, len(src))
+	for k, v := range src {
+		out[k] = v
 	}
 	return out
 }

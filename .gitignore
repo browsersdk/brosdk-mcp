@@ -2,7 +2,6 @@ pinchtab
 agent-browser
 brosdk-mcp.exe
 *.go.[0-9]*
-brosdk-mcp
 *.log
 _stderr.txt
 _stdout.txt

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func (e *Executor) activeEnvironmentLocked() *browserEnvironment {
@@ -107,4 +108,37 @@ func (e *Executor) ensureActivePageRuntime(ctx context.Context) (*pageRuntime, e
 	page.TabID = tabID
 	page.AriaRefStore = cloneAriaRefStoreForTab(e.ariaRefStore, tabID)
 	return clonePageRuntime(page), nil
+}
+
+func (e *Executor) updatePageRuntimeObservationLocked(agent *pageAgent, text string, snapshot string, proposal map[string]any, proposalSource string) {
+	if agent == nil {
+		return
+	}
+	page := e.ensurePageRuntimeLocked(agent.TabID)
+	if page == nil {
+		return
+	}
+	page.LastText = text
+	page.LastSnapshot = snapshot
+	page.LastObservedAt = time.Now().UTC()
+	page.PendingProposal = cloneMap(proposal)
+	page.PendingProposalSource = strings.TrimSpace(proposalSource)
+}
+
+func (e *Executor) updatePageRuntimeActionLocked(agent *pageAgent, toolName string, toolArgs map[string]any, nextProposal map[string]any, proposalSource string) {
+	if agent == nil {
+		return
+	}
+	page := e.ensurePageRuntimeLocked(agent.TabID)
+	if page == nil {
+		return
+	}
+	page.LastTool = strings.TrimSpace(toolName)
+	page.LastToolArgs = cloneMap(toolArgs)
+	page.PendingProposal = cloneMap(nextProposal)
+	page.PendingProposalSource = strings.TrimSpace(proposalSource)
+	if len(nextProposal) == 0 {
+		page.PendingProposal = nil
+		page.PendingProposalSource = ""
+	}
 }

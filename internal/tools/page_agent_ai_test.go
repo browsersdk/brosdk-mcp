@@ -10,16 +10,30 @@ import (
 
 func TestValidateAIProposal(t *testing.T) {
 	valid := map[string]any{
-		"tool":      "browser_click_by_ref",
-		"arguments": map[string]any{"ref": "e1"},
+		"type":              "tool",
+		"intent":            "act",
+		"tool":              "browser_click_by_ref",
+		"arguments":         map[string]any{"ref": "e1"},
+		"reason":            "click the target",
+		"confidence":        "medium",
+		"expectedOutcome":   "The page reacts after the click.",
+		"needsVerification": true,
+		"verificationHints": map[string]any{"targetName": "Sign In", "targetGone": true},
 	}
 	if err := validateAIProposal(valid); err != nil {
 		t.Fatalf("expected valid proposal, got %v", err)
 	}
 
 	invalid := map[string]any{
-		"tool":      "browser_click_by_ref",
-		"arguments": map[string]any{},
+		"type":              "tool",
+		"intent":            "act",
+		"tool":              "browser_click_by_ref",
+		"arguments":         map[string]any{},
+		"reason":            "click the target",
+		"confidence":        "medium",
+		"expectedOutcome":   "The page reacts after the click.",
+		"needsVerification": true,
+		"verificationHints": map[string]any{"targetName": "Sign In", "targetGone": true},
 	}
 	if err := validateAIProposal(invalid); err == nil {
 		t.Fatal("expected missing ref validation error")

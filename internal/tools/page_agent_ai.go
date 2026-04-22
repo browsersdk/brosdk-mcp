@@ -162,8 +162,33 @@ func validateAIProposal(proposal map[string]any) error {
 	if err != nil {
 		return err
 	}
+	proposalType, _ := proposal["type"].(string)
+	if strings.TrimSpace(proposalType) == "" {
+		return fmt.Errorf("proposal missing type")
+	}
 	if _, ok := allowedAIProposalTools[toolName]; !ok {
 		return fmt.Errorf("unsupported proposal tool %q", toolName)
+	}
+	intent, _ := proposal["intent"].(string)
+	if strings.TrimSpace(intent) == "" {
+		return fmt.Errorf("proposal missing intent")
+	}
+	reason, _ := proposal["reason"].(string)
+	if strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("proposal missing reason")
+	}
+	expectedOutcome, _ := proposal["expectedOutcome"].(string)
+	if strings.TrimSpace(expectedOutcome) == "" {
+		return fmt.Errorf("proposal missing expectedOutcome")
+	}
+	hints, exists := proposal["verificationHints"]
+	if !exists {
+		return fmt.Errorf("proposal missing verificationHints")
+	}
+	if hints != nil {
+		if _, ok := hints.(map[string]any); !ok {
+			return fmt.Errorf("proposal verificationHints must be an object")
+		}
 	}
 	switch toolName {
 	case "browser_click_by_ref":
@@ -218,8 +243,9 @@ Rules:
 - Only use browser_type_by_ref when you have a ref, and include "text" when the goal clearly specifies what to enter.
 - If the page needs more context, prefer browser_aria_snapshot or browser_get_text.
 - If the page seems not ready, prefer browser_wait_for_load.
-- Return JSON with keys: type, tool, arguments, reason, confidence.
+- Return JSON with keys: type, intent, tool, arguments, reason, confidence, expectedOutcome, needsVerification, verificationHints.
 - Optional target object may include ref, role, name.
+- verificationHints should be an object. Use lightweight hints such as valueVisible, targetName, targetGone, and successSignals when helpful.
 `
 
 	userPrompt := fmt.Sprintf("Goal:\n%s\n\nLast tool:\n%s\n\nVisible text:\n%s\n\nARIA snapshot:\n%s\n", trimForAI(goal, 1200), trimForAI(lastTool, 120), trimForAI(text, 5000), trimForAI(snapshot, 7000))

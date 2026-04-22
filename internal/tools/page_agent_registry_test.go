@@ -149,6 +149,15 @@ func TestProposeNextActionForExtractionGoal(t *testing.T) {
 	if proposal["tool"] != "browser_get_text" {
 		t.Fatalf("expected browser_get_text proposal, got %#v", proposal)
 	}
+	if proposal["intent"] != "observe" {
+		t.Fatalf("expected observe intent, got %#v", proposal)
+	}
+	if _, ok := proposal["expectedOutcome"].(string); !ok {
+		t.Fatalf("expected expectedOutcome, got %#v", proposal)
+	}
+	if _, ok := proposal["verificationHints"].(map[string]any); !ok {
+		t.Fatalf("expected verificationHints, got %#v", proposal)
+	}
 }
 
 func TestProposeNextActionForInteractionGoal(t *testing.T) {
@@ -275,6 +284,191 @@ func TestExtractInputText(t *testing.T) {
 	}
 }
 
+func TestProposalSignature(t *testing.T) {
+	proposal := map[string]any{
+		"type":              "tool",
+		"intent":            "act",
+		"tool":              "browser_click_by_ref",
+		"arguments":         map[string]any{"ref": "e3"},
+		"reason":            "click submit",
+		"confidence":        "medium",
+		"expectedOutcome":   "The page reacts after the click.",
+		"needsVerification": true,
+	}
+	if got := proposalSignature(proposal); !strings.Contains(got, "browser_click_by_ref") {
+		t.Fatalf("expected proposal signature to include tool name, got %q", got)
+	}
+}
+
+func TestObservationSignature(t *testing.T) {
+	if got := observationSignature("", ""); got != "" {
+		t.Fatalf("expected empty observation signature, got %q", got)
+	}
+	if got := observationSignature("hello", "snapshot"); !strings.Contains(got, "hello") {
+		t.Fatalf("expected observation signature to contain page text, got %q", got)
+	}
+}
+
+func TestVerificationResultForApply(t *testing.T) {
+	proposal := map[string]any{
+		"tool":              "browser_type_by_ref",
+		"needsVerification": true,
+		"expectedOutcome":   `The field "Email" contains the intended input.`,
+		"verificationHints": map[string]any{
+			"valueVisible": "qa@example.com",
+			"targetName":   "Email",
+		},
+	}
+	applyResult := map[string]any{
+		"goal":               `log in with email "qa@example.com" and password "secret123"`,
+		"tool":               "browser_type_by_ref",
+		"arguments":          map[string]any{"ref": "e1", "text": "qa@example.com"},
+		"preActionText":      "",
+		"preActionSnapshot":  `- textbox "Email" [ref=e1]`,
+		"postActionText":     "qa@example.com",
+		"postActionSnapshot": `- textbox "Email" [ref=e1] value="qa@example.com"`,
+	}
+	verification := verificationResultForApply(proposal, applyResult)
+	if ok, _ := verification["ok"].(bool); !ok {
+		t.Fatalf("expected verification to pass, got %#v", verification)
+	}
+}
+
+func TestVerificationResultForApplyFailure(t *testing.T) {
+	proposal := map[string]any{
+		"tool":              "browser_click_by_ref",
+		"needsVerification": true,
+		"expectedOutcome":   `The page reacts after clicking "Apply".`,
+		"verificationHints": map[string]any{
+			"targetName": "Apply",
+			"targetGone": true,
+		},
+		"target": map[string]any{
+			"name": "Apply",
+			"role": "button",
+		},
+	}
+	applyResult := map[string]any{
+		"goal":               `click the Apply button`,
+		"tool":               "browser_click_by_ref",
+		"arguments":          map[string]any{"ref": "e3"},
+		"preActionText":      "Apply",
+		"preActionSnapshot":  `- button "Apply" [ref=e3]`,
+		"postActionText":     "Apply",
+		"postActionSnapshot": `- button "Apply" [ref=e3]`,
+	}
+	verification := verificationResultForApply(proposal, applyResult)
+	if ok, _ := verification["ok"].(bool); ok {
+		t.Fatalf("expected verification to fail, got %#v", verification)
+	}
+}
+
+func TestVerificationResultForClickPassesOnPageChange(t *testing.T) {
+	proposal := map[string]any{
+		"tool":              "browser_click_by_ref",
+		"needsVerification": true,
+		"expectedOutcome":   `The page reacts after clicking "Sign In".`,
+		"verificationHints": map[string]any{
+			"targetName": "Sign In",
+			"targetGone": true,
+		},
+		"target": map[string]any{
+			"name": "Sign In",
+			"role": "button",
+		},
+	}
+	applyResult := map[string]any{
+		"goal":               `log in with email "qa@example.com" and password "secret123"`,
+		"tool":               "browser_click_by_ref",
+		"arguments":          map[string]any{"ref": "e3"},
+		"preActionText":      "Sign In",
+		"preActionSnapshot":  `- button "Sign In" [ref=e3]`,
+		"postActionText":     "Welcome back",
+		"postActionSnapshot": `- heading "Dashboard"`,
+	}
+	verification := verificationResultForApply(proposal, applyResult)
+	if ok, _ := verification["ok"].(bool); !ok {
+		t.Fatalf("expected click verification to pass on page change, got %#v", verification)
+	}
+}
+
+func TestVerificationFromHintsForTargetGone(t *testing.T) {
+	hints := map[string]any{
+		"targetName": "Sign In",
+		"targetGone": true,
+	}
+	verification, ok := verificationFromHints(hints, "Sign In", `- button "Sign In" [ref=e3]`, "Welcome back", `- heading "Dashboard"`)
+	if !ok {
+		t.Fatal("expected verificationFromHints to produce a result")
+	}
+	if verified, _ := verification["ok"].(bool); !verified {
+		t.Fatalf("expected hinted verification to pass, got %#v", verification)
+	}
+}
+
+func TestVerificationFromHintsForSuccessSignals(t *testing.T) {
+	hints := map[string]any{
+		"successSignals": []string{"welcome", "dashboard"},
+	}
+	verification, ok := verificationFromHints(hints, "", "", "Welcome back", `- heading "Dashboard"`)
+	if !ok {
+		t.Fatal("expected verificationFromHints to produce a result")
+	}
+	if verified, _ := verification["ok"].(bool); !verified {
+		t.Fatalf("expected hinted success-signal verification to pass, got %#v", verification)
+	}
+}
+
+func TestVerificationResultForClickPassesOnLoginSignals(t *testing.T) {
+	proposal := map[string]any{
+		"tool":              "browser_click_by_ref",
+		"needsVerification": true,
+		"expectedOutcome":   `The page reacts after clicking "Sign In".`,
+		"target": map[string]any{
+			"name": "Sign In",
+			"role": "button",
+		},
+	}
+	applyResult := map[string]any{
+		"goal":               `log in with email "qa@example.com" and password "secret123"`,
+		"tool":               "browser_click_by_ref",
+		"arguments":          map[string]any{"ref": "e3"},
+		"preActionText":      "Sign In",
+		"preActionSnapshot":  `- button "Sign In" [ref=e3]`,
+		"postActionText":     "Welcome back to your dashboard",
+		"postActionSnapshot": `- heading "Dashboard"`,
+	}
+	verification := verificationResultForApply(proposal, applyResult)
+	if ok, _ := verification["ok"].(bool); !ok {
+		t.Fatalf("expected login click verification to pass, got %#v", verification)
+	}
+}
+
+func TestVerificationResultForClickPassesOnSearchSignals(t *testing.T) {
+	proposal := map[string]any{
+		"tool":              "browser_click_by_ref",
+		"needsVerification": true,
+		"expectedOutcome":   `The search results are shown.`,
+		"target": map[string]any{
+			"name": "Search",
+			"role": "button",
+		},
+	}
+	applyResult := map[string]any{
+		"goal":               `search for "browser sdk"`,
+		"tool":               "browser_click_by_ref",
+		"arguments":          map[string]any{"ref": "e4"},
+		"preActionText":      "Search",
+		"preActionSnapshot":  `- button "Search" [ref=e4]`,
+		"postActionText":     "Results for browser sdk",
+		"postActionSnapshot": `- heading "Results for browser sdk"`,
+	}
+	verification := verificationResultForApply(proposal, applyResult)
+	if ok, _ := verification["ok"].(bool); !ok {
+		t.Fatalf("expected search click verification to pass, got %#v", verification)
+	}
+}
+
 func TestApplyPageAgentProposalWithoutProposalFails(t *testing.T) {
 	e := &Executor{
 		pageAgents: map[string]*pageAgent{
@@ -313,8 +507,14 @@ func TestApplyPageAgentProposalRecordsHistory(t *testing.T) {
 		EnvironmentName: "work",
 		TabID:           "tab-a",
 		LastProposal: map[string]any{
-			"tool":      "browser_list_page_agents",
-			"arguments": map[string]any{},
+			"type":              "tool",
+			"intent":            "observe",
+			"tool":              "browser_list_page_agents",
+			"arguments":         map[string]any{},
+			"reason":            "inspect available agents",
+			"confidence":        "low",
+			"expectedOutcome":   "A list response is returned.",
+			"needsVerification": false,
 		},
 		History: make([]pageAgentHistoryEntry, 0, 8),
 	}
@@ -332,6 +532,53 @@ func TestApplyPageAgentProposalRecordsHistory(t *testing.T) {
 	}
 	if e.pageAgents[agent.ID].History[0].Status != "applied" {
 		t.Fatalf("expected applied history status, got %#v", e.pageAgents[agent.ID].History[0])
+	}
+}
+
+func TestApplyPageAgentProposalSyncsPageRuntimeState(t *testing.T) {
+	e := &Executor{
+		currentTabID:      "tab-a",
+		environments:      map[string]*browserEnvironment{},
+		activeEnvironment: "work",
+		pageAgents:        map[string]*pageAgent{},
+	}
+	env := newBrowserEnvironment("work", "endpoint-a", nil, false)
+	env.Pages["tab-a"] = newPageRuntime("tab-a", nil, nil)
+	env.ActivePageID = "tab-a"
+	e.environments["work"] = env
+
+	agent := &pageAgent{
+		ID:                 "page-agent-1",
+		Name:               "agent",
+		Goal:               "inspect page",
+		Status:             "idle",
+		EnvironmentName:    "work",
+		TabID:              "tab-a",
+		LastProposalSource: "rules",
+		LastProposal: map[string]any{
+			"type":              "tool",
+			"intent":            "observe",
+			"tool":              "browser_list_page_agents",
+			"arguments":         map[string]any{},
+			"reason":            "inspect available agents",
+			"confidence":        "low",
+			"expectedOutcome":   "A list response is returned.",
+			"needsVerification": false,
+		},
+		History: make([]pageAgentHistoryEntry, 0, 8),
+	}
+	e.pageAgents[agent.ID] = agent
+
+	if _, err := e.callApplyPageAgentProposal(context.Background(), map[string]any{"agentId": agent.ID}); err != nil {
+		t.Fatalf("callApplyPageAgentProposal returned error: %v", err)
+	}
+
+	page := e.environments["work"].Pages["tab-a"]
+	if page.LastTool != "browser_list_page_agents" {
+		t.Fatalf("expected page runtime LastTool to sync, got %#v", page)
+	}
+	if page.PendingProposal != nil {
+		t.Fatalf("expected no pending proposal after non-browser follow-up, got %#v", page.PendingProposal)
 	}
 }
 
@@ -353,6 +600,34 @@ func TestRunPageAgentLoopRejectsInvalidRequireAIArg(t *testing.T) {
 		"requireAI": "yes",
 	}); err == nil {
 		t.Fatal("expected requireAI type validation error")
+	}
+}
+
+func TestRunPageAgentLoopRejectsInvalidStopOnRepeatedProposalArg(t *testing.T) {
+	e := &Executor{
+		pageAgents: map[string]*pageAgent{
+			"page-agent-1": {ID: "page-agent-1"},
+		},
+	}
+	if _, err := e.callRunPageAgentLoop(context.Background(), map[string]any{
+		"agentId":                "page-agent-1",
+		"stopOnRepeatedProposal": "yes",
+	}); err == nil {
+		t.Fatal("expected stopOnRepeatedProposal type validation error")
+	}
+}
+
+func TestRunPageAgentLoopRejectsInvalidStopOnNoPageChangeArg(t *testing.T) {
+	e := &Executor{
+		pageAgents: map[string]*pageAgent{
+			"page-agent-1": {ID: "page-agent-1"},
+		},
+	}
+	if _, err := e.callRunPageAgentLoop(context.Background(), map[string]any{
+		"agentId":            "page-agent-1",
+		"stopOnNoPageChange": "yes",
+	}); err == nil {
+		t.Fatal("expected stopOnNoPageChange type validation error")
 	}
 }
 

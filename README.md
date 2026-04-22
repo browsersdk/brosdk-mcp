@@ -268,6 +268,57 @@ Planned MCP surface for the first PageAgent iteration:
 - `browser_apply_page_agent_proposal`
 - `browser_remove_page_agent`
 
+Typical user-facing PageAgent scenarios:
+
+1. Search and submit
+   - Goal: `search for "browser sdk" and submit`
+   - Likely flow:
+     - `browser_create_page_agent`
+     - `browser_run_page_agent_step`
+     - proposal: `browser_type_by_ref`
+     - `browser_apply_page_agent_proposal`
+     - follow-up proposal: `browser_click_by_ref`
+
+2. Login helper for a known fixture or staging site
+   - Goal: `log in with email "qa@example.com" and password "secret123"`
+   - Likely flow:
+     - `browser_create_page_agent`
+     - `browser_run_page_agent_loop`
+     - controlled loop fills email, fills password, then clicks `Sign In`
+   - Best for:
+     - simple login forms
+     - test fixtures
+     - repeated QA verification steps
+
+3. Page inspection before interaction
+   - Goal: `inspect the checkout page and stop once the text "Payment Details" is visible`
+   - Likely flow:
+     - `browser_create_page_agent`
+     - `browser_run_page_agent_loop` with `stopWhenText`
+   - Best for:
+     - waiting for a page state before acting
+     - lightweight smoke checks
+
+4. Human-in-the-loop action proposals
+   - Goal: `click the Apply button`
+   - Likely flow:
+     - `browser_create_page_agent`
+     - `browser_run_page_agent_step`
+     - inspect `nextActionProposal`
+     - approve it with `browser_apply_page_agent_proposal`
+   - Best for:
+     - debugging
+     - validating target refs
+     - reviewing agent choices before execution
+
+Current recommendation for users:
+
+- Use regular browser MCP tools when you already know the exact selector, ref, or step sequence.
+- Use `PageAgent` when you want the server to observe the current page, propose the next action, and keep page-scoped history for a bounded workflow.
+- Keep current `PageAgent` usage focused on controlled loops and human-approved proposals, not fully autonomous browsing.
+
+For the implementation roadmap and prioritized development checklist, see [`PROJECT_SNAPSHOT.md`](PROJECT_SNAPSHOT.md).
+
 Implementation plan:
 
 1. Introduce internal page runtime objects without changing existing browser tool semantics

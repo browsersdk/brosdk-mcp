@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -23,20 +24,23 @@ var pageAgentFieldAliases = map[string][]string{
 }
 
 type pageAgent struct {
-	ID              string
-	Name            string
-	Goal            string
-	Status          string
-	EnvironmentName string
-	TabID           string
-	LastText        string
-	LastSnapshot    string
-	LastResult      map[string]any
-	LastProposal    map[string]any
-	LastRunAt       time.Time
-	History         []pageAgentHistoryEntry
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                 string
+	Name               string
+	Goal               string
+	Status             string
+	EnvironmentName    string
+	TabID              string
+	LastText           string
+	LastSnapshot       string
+	LastTool           string
+	LastToolArgs       map[string]any
+	LastResult         map[string]any
+	LastProposal       map[string]any
+	LastProposalSource string
+	LastRunAt          time.Time
+	History            []pageAgentHistoryEntry
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type pageAgentHistoryEntry struct {
@@ -63,23 +67,26 @@ func serializePageAgent(agent *pageAgent, page *pageRuntime) map[string]any {
 		refCount = len(page.AriaRefStore)
 	}
 	return map[string]any{
-		"agentId":       agent.ID,
-		"name":          agent.Name,
-		"goal":          agent.Goal,
-		"status":        agent.Status,
-		"environment":   agent.EnvironmentName,
-		"tabId":         agent.TabID,
-		"pageConnected": connected,
-		"pageRefCount":  refCount,
-		"lastText":      agent.LastText,
-		"lastSnapshot":  agent.LastSnapshot,
-		"lastResult":    agent.LastResult,
-		"lastProposal":  agent.LastProposal,
-		"lastRunAt":     formatAgentTime(agent.LastRunAt),
-		"history":       serializePageAgentHistory(agent.History),
-		"historyCount":  len(agent.History),
-		"createdAt":     agent.CreatedAt.UTC().Format(time.RFC3339),
-		"updatedAt":     agent.UpdatedAt.UTC().Format(time.RFC3339),
+		"agentId":            agent.ID,
+		"name":               agent.Name,
+		"goal":               agent.Goal,
+		"status":             agent.Status,
+		"environment":        agent.EnvironmentName,
+		"tabId":              agent.TabID,
+		"pageConnected":      connected,
+		"pageRefCount":       refCount,
+		"lastText":           agent.LastText,
+		"lastSnapshot":       agent.LastSnapshot,
+		"lastTool":           agent.LastTool,
+		"lastToolArgs":       agent.LastToolArgs,
+		"lastResult":         agent.LastResult,
+		"lastProposal":       agent.LastProposal,
+		"lastProposalSource": agent.LastProposalSource,
+		"lastRunAt":          formatAgentTime(agent.LastRunAt),
+		"history":            serializePageAgentHistory(agent.History),
+		"historyCount":       len(agent.History),
+		"createdAt":          agent.CreatedAt.UTC().Format(time.RFC3339),
+		"updatedAt":          agent.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -127,6 +134,376 @@ func summarizeStepResult(result map[string]any) string {
 		text = text[:120] + "..."
 	}
 	return text
+}
+
+func confidenceLevel(score string) string {
+	score = strings.TrimSpace(strings.ToLower(score))
+	switch score {
+	case "high", "medium", "low":
+		return score
+	default:
+		return "medium"
+	}
+}
+
+func proposalIntent(toolName string) string {
+	switch strings.TrimSpace(toolName) {
+	case "browser_get_text", "browser_aria_snapshot", "browser_screenshot":
+		return "observe"
+	case "browser_wait_for_load":
+		return "wait"
+	case "browser_click_by_ref":
+		return "act"
+	case "browser_type_by_ref":
+		return "fill"
+	default:
+		return "act"
+	}
+}
+
+func expectedOutcomeForTool(toolName string, target map[string]any) string {
+	name, _ := target["name"].(string)
+	name = strings.TrimSpace(name)
+	switch strings.TrimSpace(toolName) {
+	case "browser_get_text":
+		return "More visible page text is available for planning."
+	case "browser_aria_snapshot":
+		return "A fresh accessibility snapshot is available with concrete refs."
+	case "browser_screenshot":
+		return "A visual capture of the current page is available."
+	case "browser_wait_for_load":
+		return "The page reaches a more stable loaded state."
+	case "browser_click_by_ref":
+		if name != "" {
+			return fmt.Sprintf("The page reacts after clicking %q.", name)
+		}
+		return "The page reacts after the click."
+	case "browser_type_by_ref":
+		if name != "" {
+			return fmt.Sprintf("The field %q contains the intended input.", name)
+		}
+		return "The intended input is entered into the target field."
+	default:
+		return "The proposed action completes successfully."
+	}
+}
+
+func verificationHintsForTool(toolName string, arguments map[string]any, target map[string]any) map[string]any {
+	hints := map[string]any{}
+	name, _ := target["name"].(string)
+	name = strings.TrimSpace(name)
+	switch strings.TrimSpace(toolName) {
+	case "browser_click_by_ref":
+		if name != "" {
+			hints["targetName"] = name
+			hints["targetGone"] = true
+		}
+		lowerName := strings.ToLower(name)
+		signals := make([]string, 0, 6)
+		if strings.Contains(lowerName, "sign in") || strings.Contains(lowerName, "log in") || strings.Contains(lowerName, "login") {
+			signals = append(signals, "welcome", "dashboard", "sign out", "logout", "my account")
+		}
+		if strings.Contains(lowerName, "search") {
+			signals = append(signals, "results")
+		}
+		if strings.Contains(lowerName, "submit") || strings.Contains(lowerName, "apply") || strings.Contains(lowerName, "save") || strings.Contains(lowerName, "continue") || strings.Contains(lowerName, "next") {
+			signals = append(signals, "success", "submitted", "saved", "applied", "complete", "result:")
+		}
+		if len(signals) > 0 {
+			hints["successSignals"] = signals
+		}
+	case "browser_type_by_ref":
+		if text, _ := arguments["text"].(string); strings.TrimSpace(text) != "" {
+			hints["valueVisible"] = strings.TrimSpace(text)
+		}
+		if name != "" {
+			hints["targetName"] = name
+		}
+	}
+	return hints
+}
+
+func buildProposal(toolName string, arguments map[string]any, reason string, confidence string, target map[string]any) map[string]any {
+	proposal := map[string]any{
+		"type":              "tool",
+		"intent":            proposalIntent(toolName),
+		"tool":              toolName,
+		"arguments":         arguments,
+		"reason":            reason,
+		"confidence":        confidenceLevel(confidence),
+		"expectedOutcome":   expectedOutcomeForTool(toolName, target),
+		"needsVerification": true,
+		"verificationHints": verificationHintsForTool(toolName, arguments, target),
+	}
+	if len(target) > 0 {
+		proposal["target"] = target
+	}
+	return proposal
+}
+
+func canonicalJSONString(value any) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func proposalSignature(proposal map[string]any) string {
+	if len(proposal) == 0 {
+		return ""
+	}
+	toolName, args, err := proposalToolAndArgs(proposal)
+	if err != nil {
+		return ""
+	}
+	return toolName + "|" + canonicalJSONString(args)
+}
+
+func observationSignature(text string, snapshot string) string {
+	text = strings.TrimSpace(text)
+	snapshot = strings.TrimSpace(snapshot)
+	if text == "" && snapshot == "" {
+		return ""
+	}
+	return text + "\n---\n" + snapshot
+}
+
+func mapStringValue(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	value, _ := m[key].(string)
+	return value
+}
+
+func normalizedContains(haystack string, needle string) bool {
+	haystack = strings.ToLower(strings.TrimSpace(haystack))
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	if haystack == "" || needle == "" {
+		return false
+	}
+	return strings.Contains(haystack, needle)
+}
+
+func verificationFailure(reason string, expectedOutcome string) map[string]any {
+	result := map[string]any{
+		"ok":     false,
+		"status": "verification_failed",
+		"reason": reason,
+	}
+	if strings.TrimSpace(expectedOutcome) != "" {
+		result["expectedOutcome"] = expectedOutcome
+	}
+	return result
+}
+
+func verificationSuccess(reason string) map[string]any {
+	return map[string]any{
+		"ok":     true,
+		"status": "verified",
+		"reason": reason,
+	}
+}
+
+func combinedObservationText(text string, snapshot string) string {
+	return strings.ToLower(strings.TrimSpace(text + "\n" + snapshot))
+}
+
+func goalHasAny(goal string, phrases ...string) bool {
+	goal = strings.ToLower(strings.TrimSpace(goal))
+	if goal == "" {
+		return false
+	}
+	for _, phrase := range phrases {
+		if strings.Contains(goal, strings.ToLower(strings.TrimSpace(phrase))) {
+			return true
+		}
+	}
+	return false
+}
+
+func observationHasAny(text string, snapshot string, phrases ...string) bool {
+	combined := combinedObservationText(text, snapshot)
+	if combined == "" {
+		return false
+	}
+	for _, phrase := range phrases {
+		if strings.Contains(combined, strings.ToLower(strings.TrimSpace(phrase))) {
+			return true
+		}
+	}
+	return false
+}
+
+func quotedGoalValues(goal string) []string {
+	matches := quotedValuePattern.FindAllStringSubmatch(strings.TrimSpace(goal), -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(matches))
+	seen := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		for _, value := range match[1:] {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			key := strings.ToLower(value)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func goalSpecificVerification(goal string, toolName string, preText string, preSnapshot string, postText string, postSnapshot string, targetName string) (map[string]any, bool) {
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		return nil, false
+	}
+
+	if strings.TrimSpace(toolName) == "browser_type_by_ref" {
+		for _, value := range quotedGoalValues(goal) {
+			if observationHasAny(postText, postSnapshot, value) {
+				return verificationSuccess(fmt.Sprintf("The post-action page state contains the goal value %q.", value)), true
+			}
+		}
+	}
+
+	if strings.TrimSpace(toolName) == "browser_click_by_ref" {
+		if goalHasAny(goal, "log in", "login", "sign in") && observationHasAny(postText, postSnapshot, "welcome", "dashboard", "sign out", "logout", "my account") {
+			return verificationSuccess("The post-action page contains common sign-in success signals."), true
+		}
+		if goalHasAny(goal, "search") {
+			for _, value := range quotedGoalValues(goal) {
+				if observationHasAny(postText, postSnapshot, value) {
+					return verificationSuccess(fmt.Sprintf("The search results appear to reference the requested value %q.", value)), true
+				}
+			}
+		}
+		if goalHasAny(goal, "submit", "apply", "save", "continue", "next") && observationHasAny(postText, postSnapshot, "success", "submitted", "saved", "applied", "complete", "result:") {
+			return verificationSuccess("The post-action page contains common completion signals."), true
+		}
+		if strings.TrimSpace(targetName) != "" {
+			preHasTarget := normalizedContains(preText, targetName) || normalizedContains(preSnapshot, targetName)
+			postHasTarget := normalizedContains(postText, targetName) || normalizedContains(postSnapshot, targetName)
+			if preHasTarget && !postHasTarget {
+				return verificationSuccess(fmt.Sprintf("The clicked target %q is no longer present in the post-action page state.", targetName)), true
+			}
+		}
+	}
+
+	return nil, false
+}
+
+func verificationFromHints(hints map[string]any, preText string, preSnapshot string, postText string, postSnapshot string) (map[string]any, bool) {
+	if len(hints) == 0 {
+		return nil, false
+	}
+	if valueVisible, _ := hints["valueVisible"].(string); strings.TrimSpace(valueVisible) != "" {
+		if observationHasAny(postText, postSnapshot, valueVisible) {
+			return verificationSuccess(fmt.Sprintf("The post-action page state contains the hinted value %q.", valueVisible)), true
+		}
+	}
+	if rawSignals, ok := hints["successSignals"].([]string); ok && len(rawSignals) > 0 {
+		if observationHasAny(postText, postSnapshot, rawSignals...) {
+			return verificationSuccess("The post-action page contains hinted success signals."), true
+		}
+	}
+	if rawSignals, ok := hints["successSignals"].([]any); ok && len(rawSignals) > 0 {
+		signals := make([]string, 0, len(rawSignals))
+		for _, signal := range rawSignals {
+			if text, ok := signal.(string); ok && strings.TrimSpace(text) != "" {
+				signals = append(signals, text)
+			}
+		}
+		if len(signals) > 0 && observationHasAny(postText, postSnapshot, signals...) {
+			return verificationSuccess("The post-action page contains hinted success signals."), true
+		}
+	}
+	targetName, _ := hints["targetName"].(string)
+	if targetGone, _ := hints["targetGone"].(bool); targetGone && strings.TrimSpace(targetName) != "" {
+		preHasTarget := normalizedContains(preText, targetName) || normalizedContains(preSnapshot, targetName)
+		postHasTarget := normalizedContains(postText, targetName) || normalizedContains(postSnapshot, targetName)
+		if preHasTarget && !postHasTarget {
+			return verificationSuccess(fmt.Sprintf("The hinted target %q is no longer present in the post-action page state.", targetName)), true
+		}
+	}
+	return nil, false
+}
+
+func verificationResultForApply(proposal map[string]any, applyResult map[string]any) map[string]any {
+	needsVerification, _ := proposal["needsVerification"].(bool)
+	if !needsVerification {
+		return map[string]any{
+			"ok":     true,
+			"status": "not_required",
+			"reason": "The proposal does not require post-action verification.",
+		}
+	}
+
+	toolName, _ := applyResult["tool"].(string)
+	expectedOutcome, _ := proposal["expectedOutcome"].(string)
+	postText, _ := applyResult["postActionText"].(string)
+	postSnapshot, _ := applyResult["postActionSnapshot"].(string)
+	preText, _ := applyResult["preActionText"].(string)
+	preSnapshot, _ := applyResult["preActionSnapshot"].(string)
+	goal, _ := applyResult["goal"].(string)
+	result, _ := applyResult["result"].(map[string]any)
+	target, _ := proposal["target"].(map[string]any)
+	hints, _ := proposal["verificationHints"].(map[string]any)
+	targetName, _ := target["name"].(string)
+	targetRole, _ := target["role"].(string)
+	postSig := observationSignature(postText, postSnapshot)
+	preSig := observationSignature(preText, preSnapshot)
+
+	switch strings.TrimSpace(toolName) {
+	case "browser_click_by_ref":
+		if verification, ok := verificationFromHints(hints, preText, preSnapshot, postText, postSnapshot); ok {
+			return verification
+		}
+		if verification, ok := goalSpecificVerification(goal, toolName, preText, preSnapshot, postText, postSnapshot, targetName); ok {
+			return verification
+		}
+		if postSig != "" && preSig != "" && postSig != preSig && (normalizedContains(postText, targetName) || normalizedContains(postSnapshot, targetName)) {
+			return verificationSuccess(fmt.Sprintf("The post-action page changed and still references the clicked %s target %q.", strings.TrimSpace(targetRole), strings.TrimSpace(targetName)))
+		}
+		if postSig != "" && preSig != "" && postSig != preSig {
+			return verificationSuccess("The click changed the observed page state.")
+		}
+		return verificationFailure("The click completed, but the observed page state did not show a clear change or target-specific confirmation.", expectedOutcome)
+	case "browser_type_by_ref":
+		if verification, ok := verificationFromHints(hints, preText, preSnapshot, postText, postSnapshot); ok {
+			return verification
+		}
+		if verification, ok := goalSpecificVerification(goal, toolName, preText, preSnapshot, postText, postSnapshot, targetName); ok {
+			return verification
+		}
+		args, _ := applyResult["arguments"].(map[string]any)
+		expectedText, _ := args["text"].(string)
+		if strings.TrimSpace(expectedText) != "" && (strings.Contains(postText, expectedText) || strings.Contains(postSnapshot, expectedText)) {
+			return verificationSuccess("The typed text is reflected in the post-action page state.")
+		}
+		if postSig != "" && preSig != "" && postSig != preSig {
+			return verificationSuccess("Typing changed the observed page state.")
+		}
+		return verificationFailure("Typing completed, but the expected value was not visible in the post-action page state.", expectedOutcome)
+	case "browser_wait_for_load":
+		if ok, _ := result["ok"].(bool); ok {
+			return verificationSuccess("The wait operation completed successfully.")
+		}
+		return verificationFailure("The wait action did not return a successful result.", expectedOutcome)
+	case "browser_get_text", "browser_aria_snapshot", "browser_screenshot":
+		if ok, _ := result["ok"].(bool); ok {
+			return verificationSuccess("The observation tool completed successfully.")
+		}
+		return verificationFailure("The observation tool did not return a successful result.", expectedOutcome)
+	}
+	return verificationFailure("The action completed, but no verification rule matched this tool.", expectedOutcome)
 }
 
 type snapshotRefCandidate struct {
@@ -538,13 +915,13 @@ func proposeNextActionFromContext(goal string, text string, snapshot string, las
 	lastRef, _ := lastArgs["ref"].(string)
 
 	if normalizedText == "" && normalizedSnapshot == "" {
-		return map[string]any{
-			"type":       "tool",
-			"tool":       "browser_wait_for_load",
-			"arguments":  map[string]any{"waitUntil": "load", "timeoutMs": 30000},
-			"reason":     "The page does not yet have readable text or an accessibility snapshot, so waiting for load is the safest next step.",
-			"confidence": "medium",
-		}
+		return buildProposal(
+			"browser_wait_for_load",
+			map[string]any{"waitUntil": "load", "timeoutMs": 30000},
+			"The page does not yet have readable text or an accessibility snapshot, so waiting for load is the safest next step.",
+			"medium",
+			nil,
+		)
 	}
 
 	if normalizedLastTool == "browser_type_by_ref" || normalizedLastTool == "browser_set_input_value_by_ref" || normalizedLastTool == "browser_type" || normalizedLastTool == "browser_set_input_value" {
@@ -565,71 +942,68 @@ func proposeNextActionFromContext(goal string, text string, snapshot string, las
 			remainingFields = fieldOrder
 		}
 		if structured := findStructuredInputCandidate(goal, candidates, structuredValues, strings.TrimSpace(lastRef), remainingFields); structured != nil {
-			return map[string]any{
-				"type":       "tool",
-				"tool":       "browser_type_by_ref",
-				"arguments":  map[string]any{"ref": structured.Node.Ref, "text": structured.Value, "clear": true},
-				"reason":     fmt.Sprintf("The goal includes a %s value and the snapshot contains a likely %s field named %q that has not been filled yet.", structured.Field, structured.Node.Role, structured.Node.Name),
-				"confidence": "medium",
-				"target": map[string]any{
+			return buildProposal(
+				"browser_type_by_ref",
+				map[string]any{"ref": structured.Node.Ref, "text": structured.Value, "clear": true},
+				fmt.Sprintf("The goal includes a %s value and the snapshot contains a likely %s field named %q that has not been filled yet.", structured.Field, structured.Node.Role, structured.Node.Name),
+				"medium",
+				map[string]any{
 					"ref":   structured.Node.Ref,
 					"role":  structured.Node.Role,
 					"name":  structured.Node.Name,
 					"field": structured.Field,
 				},
-			}
+			)
 		}
 		if candidate := findPostInputClickCandidate(goal, candidates); candidate != nil {
-			return map[string]any{
-				"type":       "tool",
-				"tool":       "browser_click_by_ref",
-				"arguments":  map[string]any{"ref": candidate.Ref},
-				"reason":     fmt.Sprintf("Text has been entered and the snapshot contains a likely follow-up %s target named %q.", candidate.Role, candidate.Name),
-				"confidence": "medium",
-				"target": map[string]any{
+			return buildProposal(
+				"browser_click_by_ref",
+				map[string]any{"ref": candidate.Ref},
+				fmt.Sprintf("Text has been entered and the snapshot contains a likely follow-up %s target named %q.", candidate.Role, candidate.Name),
+				"medium",
+				map[string]any{
 					"ref":  candidate.Ref,
 					"role": candidate.Role,
 					"name": candidate.Name,
 				},
-			}
+			)
 		}
 	}
 
 	if strings.Contains(normalizedGoal, "extract") || strings.Contains(normalizedGoal, "read") || strings.Contains(normalizedGoal, "summarize") || strings.Contains(normalizedGoal, "inspect") || strings.Contains(normalizedGoal, "analy") {
-		return map[string]any{
-			"type":       "tool",
-			"tool":       "browser_get_text",
-			"arguments":  map[string]any{"maxChars": 5000},
-			"reason":     "The goal is information-oriented, so expanding the visible page text is a good next step before making interaction decisions.",
-			"confidence": "high",
-		}
+		return buildProposal(
+			"browser_get_text",
+			map[string]any{"maxChars": 5000},
+			"The goal is information-oriented, so expanding the visible page text is a good next step before making interaction decisions.",
+			"high",
+			nil,
+		)
 	}
 
 	if strings.Contains(normalizedGoal, "screenshot") || strings.Contains(normalizedGoal, "capture") || strings.Contains(normalizedGoal, "image") {
-		return map[string]any{
-			"type":       "tool",
-			"tool":       "browser_screenshot",
-			"arguments":  map[string]any{"format": "png", "fullPage": true},
-			"reason":     "The goal mentions capture-oriented output, so a screenshot is the most direct next observation.",
-			"confidence": "high",
-		}
+		return buildProposal(
+			"browser_screenshot",
+			map[string]any{"format": "png", "fullPage": true},
+			"The goal mentions capture-oriented output, so a screenshot is the most direct next observation.",
+			"high",
+			nil,
+		)
 	}
 
 	if len(structuredValues) > 0 || strings.Contains(normalizedGoal, "search") || strings.Contains(normalizedGoal, "input") || strings.Contains(normalizedGoal, "enter") || strings.Contains(normalizedGoal, "fill") || strings.Contains(normalizedGoal, "type ") {
 		if structured := findStructuredInputCandidate(goal, candidates, structuredValues, "", structuredFieldOrder(goal, structuredValues)); structured != nil {
-			return map[string]any{
-				"type":       "tool",
-				"tool":       "browser_type_by_ref",
-				"arguments":  map[string]any{"ref": structured.Node.Ref, "text": structured.Value, "clear": true},
-				"reason":     fmt.Sprintf("The goal includes a %s value and the snapshot contains a likely %s field named %q.", structured.Field, structured.Node.Role, structured.Node.Name),
-				"confidence": "medium",
-				"target": map[string]any{
+			return buildProposal(
+				"browser_type_by_ref",
+				map[string]any{"ref": structured.Node.Ref, "text": structured.Value, "clear": true},
+				fmt.Sprintf("The goal includes a %s value and the snapshot contains a likely %s field named %q.", structured.Field, structured.Node.Role, structured.Node.Name),
+				"medium",
+				map[string]any{
 					"ref":   structured.Node.Ref,
 					"role":  structured.Node.Role,
 					"name":  structured.Node.Name,
 					"field": structured.Field,
 				},
-			}
+			)
 		}
 		if candidate := findTextboxCandidate(goal, candidates); candidate != nil {
 			inputText := extractInputText(goal)
@@ -640,52 +1014,50 @@ func proposeNextActionFromContext(goal string, text string, snapshot string, las
 				args["clear"] = true
 				reason = fmt.Sprintf("The goal suggests entering %q and the snapshot contains a likely %s target named %q.", inputText, candidate.Role, candidate.Name)
 			}
-			return map[string]any{
-				"type":       "tool",
-				"tool":       "browser_type_by_ref",
-				"arguments":  args,
-				"reason":     reason,
-				"confidence": "medium",
-				"target": map[string]any{
+			return buildProposal(
+				"browser_type_by_ref",
+				args,
+				reason,
+				"medium",
+				map[string]any{
 					"ref":  candidate.Ref,
 					"role": candidate.Role,
 					"name": candidate.Name,
 				},
-			}
+			)
 		}
 	}
 
 	if strings.Contains(normalizedGoal, "click") || strings.Contains(normalizedGoal, "open") || strings.Contains(normalizedGoal, "submit") || strings.Contains(normalizedGoal, "login") || strings.Contains(normalizedGoal, "sign in") || strings.Contains(normalizedGoal, "select") {
 		if candidate := findClickCandidate(goal, candidates); candidate != nil {
-			return map[string]any{
-				"type":       "tool",
-				"tool":       "browser_click_by_ref",
-				"arguments":  map[string]any{"ref": candidate.Ref},
-				"reason":     fmt.Sprintf("The goal suggests an interaction and the snapshot contains a likely %s target named %q.", candidate.Role, candidate.Name),
-				"confidence": "medium",
-				"target": map[string]any{
+			return buildProposal(
+				"browser_click_by_ref",
+				map[string]any{"ref": candidate.Ref},
+				fmt.Sprintf("The goal suggests an interaction and the snapshot contains a likely %s target named %q.", candidate.Role, candidate.Name),
+				"medium",
+				map[string]any{
 					"ref":  candidate.Ref,
 					"role": candidate.Role,
 					"name": candidate.Name,
 				},
-			}
+			)
 		}
-		return map[string]any{
-			"type":       "tool",
-			"tool":       "browser_aria_snapshot",
-			"arguments":  map[string]any{},
-			"reason":     "The goal likely needs interaction, and an accessibility snapshot is the safest way to choose a concrete target before clicking or typing.",
-			"confidence": "medium",
-		}
+		return buildProposal(
+			"browser_aria_snapshot",
+			map[string]any{},
+			"The goal likely needs interaction, and an accessibility snapshot is the safest way to choose a concrete target before clicking or typing.",
+			"medium",
+			nil,
+		)
 	}
 
-	return map[string]any{
-		"type":       "tool",
-		"tool":       "browser_aria_snapshot",
-		"arguments":  map[string]any{},
-		"reason":     "A fresh accessibility snapshot is the best general-purpose next step when the goal does not yet imply a more specific tool.",
-		"confidence": "medium",
-	}
+	return buildProposal(
+		"browser_aria_snapshot",
+		map[string]any{},
+		"A fresh accessibility snapshot is the best general-purpose next step when the goal does not yet imply a more specific tool.",
+		"medium",
+		nil,
+	)
 }
 
 func proposeNextAction(goal string, text string, snapshot string) map[string]any {
@@ -902,10 +1274,14 @@ func (e *Executor) callRunPageAgentStep(ctx context.Context, args map[string]any
 		current.Status = "idle"
 		current.LastText = text
 		current.LastSnapshot = snapshot
+		current.LastTool = ""
+		current.LastToolArgs = nil
 		current.LastResult = stepResult
 		current.LastProposal = proposal
+		current.LastProposalSource = proposalSource
 		current.LastRunAt = now
 		current.UpdatedAt = now
+		e.updatePageRuntimeObservationLocked(current, text, snapshot, proposal, proposalSource)
 		current.History = append(current.History, pageAgentHistoryEntry{
 			Step:        step,
 			Status:      "ok",
@@ -926,6 +1302,7 @@ func (e *Executor) callRunPageAgentStep(ctx context.Context, args map[string]any
 			step := len(current.History) + 1
 			current.Status = "error"
 			current.LastResult = map[string]any{"ok": false, "error": err.Error()}
+			current.LastProposalSource = ""
 			current.LastRunAt = now
 			current.UpdatedAt = now
 			current.History = append(current.History, pageAgentHistoryEntry{
@@ -966,6 +1343,11 @@ func proposalToolAndArgs(proposal map[string]any) (string, map[string]any, error
 func summarizeApplyResult(toolName string, result map[string]any) string {
 	if len(result) == 0 {
 		return fmt.Sprintf("applied %s", toolName)
+	}
+	if verification, _ := result["verification"].(map[string]any); verification != nil {
+		if ok, _ := verification["ok"].(bool); !ok {
+			return fmt.Sprintf("applied %s but verification failed", toolName)
+		}
 	}
 	if ok, _ := result["ok"].(bool); ok {
 		return fmt.Sprintf("applied %s successfully", toolName)
@@ -1011,15 +1393,19 @@ func (e *Executor) callApplyPageAgentProposal(ctx context.Context, args map[stri
 		}
 
 		applyResult := map[string]any{
-			"ok":        true,
-			"tool":      toolName,
-			"arguments": toolArgs,
-			"proposal":  proposal,
-			"result":    toolResult,
-			"tabId":     bound.TabID,
+			"ok":                true,
+			"goal":              bound.Goal,
+			"tool":              toolName,
+			"arguments":         toolArgs,
+			"proposal":          proposal,
+			"result":            toolResult,
+			"tabId":             bound.TabID,
+			"preActionText":     bound.LastText,
+			"preActionSnapshot": bound.LastSnapshot,
 		}
 
 		var nextProposal map[string]any
+		nextProposalSource := ""
 		if e.browserClient != nil {
 			textResult, textErr := e.callGetText(ctx, map[string]any{"maxChars": 2000})
 			snapshotResult, snapshotErr := e.callAriaSnapshot(ctx, map[string]any{})
@@ -1027,7 +1413,7 @@ func (e *Executor) callApplyPageAgentProposal(ctx context.Context, args map[stri
 				text, _ := textResult["text"].(string)
 				snapshot, _ := snapshotResult["snapshot"].(string)
 				aiProposal, aiErr := e.generateAIProposal(ctx, bound.Goal, text, snapshot, toolName)
-				nextProposalSource := "ai"
+				nextProposalSource = "ai"
 				if aiErr == nil {
 					nextProposal = aiProposal
 				} else {
@@ -1040,6 +1426,7 @@ func (e *Executor) callApplyPageAgentProposal(ctx context.Context, args map[stri
 				applyResult["postActionSnapshot"] = snapshot
 			}
 		}
+		applyResult["verification"] = verificationResultForApply(proposal, applyResult)
 
 		e.mu.Lock()
 		defer e.mu.Unlock()
@@ -1049,16 +1436,39 @@ func (e *Executor) callApplyPageAgentProposal(ctx context.Context, args map[stri
 		}
 		now := time.Now().UTC()
 		step := len(current.History) + 1
+		historyStatus := "applied"
+		if verification, _ := applyResult["verification"].(map[string]any); verification != nil {
+			if ok, _ := verification["ok"].(bool); !ok {
+				historyStatus = "verification_failed"
+			}
+		}
 		current.Status = "idle"
+		current.LastTool = toolName
+		current.LastToolArgs = cloneMap(toolArgs)
 		current.LastResult = applyResult
 		if len(nextProposal) > 0 {
 			current.LastProposal = nextProposal
+			current.LastProposalSource = nextProposalSource
+		} else {
+			current.LastProposal = nil
+			current.LastProposalSource = ""
 		}
 		current.LastRunAt = now
 		current.UpdatedAt = now
+		e.updatePageRuntimeActionLocked(current, toolName, toolArgs, nextProposal, nextProposalSource)
+		if text, _ := applyResult["postActionText"].(string); text != "" {
+			current.LastText = text
+			if snapshot, _ := applyResult["postActionSnapshot"].(string); snapshot != "" {
+				current.LastSnapshot = snapshot
+				e.updatePageRuntimeObservationLocked(current, text, snapshot, nextProposal, nextProposalSource)
+			}
+		} else if snapshot, _ := applyResult["postActionSnapshot"].(string); snapshot != "" {
+			current.LastSnapshot = snapshot
+			e.updatePageRuntimeObservationLocked(current, current.LastText, snapshot, nextProposal, nextProposalSource)
+		}
 		current.History = append(current.History, pageAgentHistoryEntry{
 			Step:        step,
-			Status:      "applied",
+			Status:      historyStatus,
 			Summary:     summarizeApplyResult(toolName, applyResult),
 			Result:      applyResult,
 			StartedAt:   startedAt,
@@ -1075,7 +1485,10 @@ func (e *Executor) callApplyPageAgentProposal(ctx context.Context, args map[stri
 			now := time.Now().UTC()
 			step := len(current.History) + 1
 			current.Status = "error"
+			current.LastTool = ""
+			current.LastToolArgs = nil
 			current.LastResult = map[string]any{"ok": false, "error": err.Error(), "proposal": proposal}
+			current.LastProposalSource = ""
 			current.LastRunAt = now
 			current.UpdatedAt = now
 			current.History = append(current.History, pageAgentHistoryEntry{
@@ -1122,6 +1535,18 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 	} else if err != nil {
 		return nil, err
 	}
+	stopOnRepeatedProposal := false
+	if v, ok, err := getBoolArg(args, "stopOnRepeatedProposal"); err == nil && ok {
+		stopOnRepeatedProposal = v
+	} else if err != nil {
+		return nil, err
+	}
+	stopOnNoPageChange := false
+	if v, ok, err := getBoolArg(args, "stopOnNoPageChange"); err == nil && ok {
+		stopOnNoPageChange = v
+	} else if err != nil {
+		return nil, err
+	}
 	stopWhenText, _ := getStringArg(args, "stopWhenText")
 	stopWhenText = strings.TrimSpace(stopWhenText)
 	stopOnTool, _ := getStringArg(args, "stopOnTool")
@@ -1130,6 +1555,8 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 	steps := make([]map[string]any, 0, maxSteps)
 	stopReason := "max_steps_reached"
 	errorCount := 0
+	lastProposalSig := ""
+	lastObservationSig := ""
 
 	for i := 0; i < maxSteps; i++ {
 		stepResult, err := e.callRunPageAgentStep(ctx, map[string]any{
@@ -1176,6 +1603,11 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 			stopReason = "no_proposal"
 			break
 		}
+		currentProposalSig := proposalSignature(proposal)
+		if stopOnRepeatedProposal && currentProposalSig != "" && currentProposalSig == lastProposalSig {
+			stopReason = "stop_on_repeated_proposal"
+			break
+		}
 
 		applyResult, err := e.callApplyPageAgentProposal(ctx, map[string]any{
 			"agentId": agentID,
@@ -1207,6 +1639,12 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 				break
 			}
 		}
+		if verification, _ := applyBody["verification"].(map[string]any); verification != nil {
+			if ok, _ := verification["ok"].(bool); !ok {
+				stopReason = "verification_failed"
+				break
+			}
+		}
 		if stopWhenText != "" {
 			if text, _ := applyBody["postActionText"].(string); strings.Contains(text, stopWhenText) {
 				stopReason = "stop_when_text_matched"
@@ -1224,6 +1662,33 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 			stopReason = "no_followup_proposal"
 			break
 		}
+		if stopOnRepeatedProposal {
+			nextProposalSig := proposalSignature(nextProposal)
+			if nextProposalSig != "" && nextProposalSig == currentProposalSig {
+				stopReason = "stop_on_repeated_proposal"
+				break
+			}
+			lastProposalSig = currentProposalSig
+		}
+		if stopOnNoPageChange {
+			beforeSig := observationSignature(
+				mapStringValue(stepBody, "text"),
+				mapStringValue(stepBody, "snapshot"),
+			)
+			afterSig := observationSignature(
+				mapStringValue(applyBody, "postActionText"),
+				mapStringValue(applyBody, "postActionSnapshot"),
+			)
+			if beforeSig != "" && afterSig != "" && beforeSig == afterSig {
+				stopReason = "stop_on_no_page_change"
+				break
+			}
+			if afterSig != "" && afterSig == lastObservationSig {
+				stopReason = "stop_on_no_page_change"
+				break
+			}
+			lastObservationSig = afterSig
+		}
 	}
 
 	agentResult, err := e.callGetPageAgent(ctx, map[string]any{"agentId": agentID})
@@ -1232,16 +1697,18 @@ func (e *Executor) callRunPageAgentLoop(ctx context.Context, args map[string]any
 	}
 
 	return map[string]any{
-		"ok":           true,
-		"agentId":      agentID,
-		"maxSteps":     maxSteps,
-		"maxErrors":    maxErrors,
-		"errorCount":   errorCount,
-		"requireAI":    requireAI,
-		"stopWhenText": stopWhenText,
-		"stopOnTool":   stopOnTool,
-		"stopReason":   stopReason,
-		"steps":        steps,
-		"agent":        agentResult,
+		"ok":                     true,
+		"agentId":                agentID,
+		"maxSteps":               maxSteps,
+		"maxErrors":              maxErrors,
+		"errorCount":             errorCount,
+		"requireAI":              requireAI,
+		"stopOnRepeatedProposal": stopOnRepeatedProposal,
+		"stopOnNoPageChange":     stopOnNoPageChange,
+		"stopWhenText":           stopWhenText,
+		"stopOnTool":             stopOnTool,
+		"stopReason":             stopReason,
+		"steps":                  steps,
+		"agent":                  agentResult,
 	}, nil
 }

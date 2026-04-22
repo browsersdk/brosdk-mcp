@@ -229,6 +229,23 @@
       color: var(--muted);
       line-height: 1.45;
     }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .detail-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      padding: 14px;
+    }
+    .detail-card strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: var(--ink);
+    }
     .mini {
       margin-top: 8px;
       padding: 10px;
@@ -326,6 +343,15 @@
 
       <div class="panel span-4">
         <h2>Create PageAgent</h2>
+        <label for="agent-scenario">Goal preset</label>
+        <select id="agent-scenario">
+          <option value="">custom</option>
+          <option value='search for "browser sdk" and submit'>Search and submit</option>
+          <option value='log in with email "qa@example.com" and password "secret123"'>Login fixture</option>
+          <option value='inspect the checkout page and stop once the text "Payment Details" is visible'>Inspect until text</option>
+          <option value='click the Apply button'>Click apply</option>
+        </select>
+
         <label for="agent-goal">Goal</label>
         <textarea id="agent-goal" placeholder="Example: open the pricing page and extract the visible pricing table."></textarea>
 
@@ -359,8 +385,26 @@
             <input id="loop-max-errors" type="number" min="1" max="20" value="1">
           </div>
           <div>
+            <label for="loop-max-chars">Loop maxChars</label>
+            <input id="loop-max-chars" type="number" min="1" max="1000000" value="2000">
+          </div>
+          <div>
             <label for="loop-require-ai">Loop requireAI</label>
             <select id="loop-require-ai">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+          <div>
+            <label for="loop-stop-repeat">Stop repeated proposal</label>
+            <select id="loop-stop-repeat">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+          <div>
+            <label for="loop-stop-nochange">Stop no page change</label>
+            <select id="loop-stop-nochange">
               <option value="false" selected>false</option>
               <option value="true">true</option>
             </select>
@@ -432,6 +476,25 @@
       </div>
 
       <div class="panel span-12">
+        <h2>Execution Details</h2>
+        <div class="hint">Inspect step output, apply verification, and loop stop reasons here while testing PageAgent flows.</div>
+        <div class="detail-grid">
+          <div class="detail-card">
+            <strong>Last Step</strong>
+            <div class="mini" id="step-panel">No step result yet.</div>
+          </div>
+          <div class="detail-card">
+            <strong>Last Apply</strong>
+            <div class="mini" id="apply-panel">No apply result yet.</div>
+          </div>
+          <div class="detail-card">
+            <strong>Last Loop</strong>
+            <div class="mini" id="loop-panel">No loop result yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel span-12">
         <h2>Output</h2>
         <div class="hint">PageAgent responses now include `history`, `historyCount`, and `nextActionProposal`. After each step, look under `agent.history` and `stepResult.nextActionProposal` to review the execution trail and suggested next move.</div>
         <pre class="pre" id="output"></pre>
@@ -459,6 +522,7 @@
       launchUrl: document.getElementById('launch-url'),
       launchHeadless: document.getElementById('launch-headless'),
       launchActive: document.getElementById('launch-active'),
+      agentScenario: document.getElementById('agent-scenario'),
       agentGoal: document.getElementById('agent-goal'),
       agentName: document.getElementById('agent-name'),
       agentTab: document.getElementById('agent-tab'),
@@ -466,13 +530,19 @@
       manageAgentId: document.getElementById('manage-agent-id'),
       loopMaxSteps: document.getElementById('loop-max-steps'),
       loopMaxErrors: document.getElementById('loop-max-errors'),
+      loopMaxChars: document.getElementById('loop-max-chars'),
       loopRequireAI: document.getElementById('loop-require-ai'),
+      loopStopRepeat: document.getElementById('loop-stop-repeat'),
+      loopStopNoChange: document.getElementById('loop-stop-nochange'),
       loopStopText: document.getElementById('loop-stop-text'),
       loopStopTool: document.getElementById('loop-stop-tool'),
       agentStateId: document.getElementById('agent-state-id'),
       agentStateSummary: document.getElementById('agent-state-summary'),
       proposalPanel: document.getElementById('proposal-panel'),
       historyPanel: document.getElementById('history-panel'),
+      stepPanel: document.getElementById('step-panel'),
+      applyPanel: document.getElementById('apply-panel'),
+      loopPanel: document.getElementById('loop-panel'),
     };
 
     const uiConfigEndpoint = `${location.origin}/ui/config`;
@@ -480,6 +550,9 @@
     let rpcID = 1;
     let tools = [];
     let currentAgent = null;
+    let lastStepResult = null;
+    let lastApplyResult = null;
+    let lastLoopResult = null;
 
     function setStatus(text) {
       els.lastStatus.textContent = text;
@@ -501,15 +574,66 @@
       }
       const args = proposal.arguments ? JSON.stringify(proposal.arguments, null, 2) : '{}';
       const target = proposal.target ? JSON.stringify(proposal.target, null, 2) : '';
+      const hints = proposal.verificationHints ? JSON.stringify(proposal.verificationHints, null, 2) : '';
       els.proposalPanel.innerHTML = `
         <div class="proposal-title">${proposal.tool}</div>
         <div class="proposal-meta">
+          <div><strong>Intent</strong><br>${proposal.intent || 'unknown'}</div>
+          <div><strong>Source</strong><br>${currentAgent?.lastProposalSource || 'unknown'}</div>
           <div><strong>Reason</strong><br>${proposal.reason || 'No reason provided'}</div>
           <div><strong>Confidence</strong><br>${proposal.confidence || 'unknown'}</div>
+          <div><strong>Expected Outcome</strong><br>${proposal.expectedOutcome || 'No expected outcome provided'}</div>
+          <div><strong>Needs Verification</strong><br>${String(proposal.needsVerification ?? false)}</div>
           <div><strong>Arguments</strong><div class="mini">${args}</div></div>
           ${target ? `<div><strong>Target</strong><div class="mini">${target}</div></div>` : ''}
+          ${hints ? `<div><strong>Verification Hints</strong><div class="mini">${hints}</div></div>` : ''}
         </div>
       `;
+    }
+
+    function renderStep(stepResult) {
+      if (!stepResult || typeof stepResult !== 'object') {
+        els.stepPanel.textContent = 'No step result yet.';
+        return;
+      }
+      const summary = {
+        proposalSource: stepResult.proposalSource || null,
+        tool: stepResult.nextActionProposal?.tool || null,
+        expectedOutcome: stepResult.nextActionProposal?.expectedOutcome || null,
+        textPreview: stepResult.text ? String(stepResult.text).slice(0, 220) : '',
+      };
+      els.stepPanel.textContent = JSON.stringify(summary, null, 2);
+    }
+
+    function renderApply(applyResult) {
+      if (!applyResult || typeof applyResult !== 'object') {
+        els.applyPanel.textContent = 'No apply result yet.';
+        return;
+      }
+      const summary = {
+        tool: applyResult.tool || null,
+        verification: applyResult.verification || null,
+        nextActionProposalSource: applyResult.nextActionProposalSource || null,
+        nextTool: applyResult.nextActionProposal?.tool || null,
+        postActionTextPreview: applyResult.postActionText ? String(applyResult.postActionText).slice(0, 220) : '',
+      };
+      els.applyPanel.textContent = JSON.stringify(summary, null, 2);
+    }
+
+    function renderLoop(loopResult) {
+      if (!loopResult || typeof loopResult !== 'object') {
+        els.loopPanel.textContent = 'No loop result yet.';
+        return;
+      }
+      const summary = {
+        stopReason: loopResult.stopReason || null,
+        errorCount: loopResult.errorCount ?? null,
+        maxSteps: loopResult.maxSteps ?? null,
+        stopOnRepeatedProposal: loopResult.stopOnRepeatedProposal ?? null,
+        stopOnNoPageChange: loopResult.stopOnNoPageChange ?? null,
+        stepsRecorded: Array.isArray(loopResult.steps) ? loopResult.steps.length : 0,
+      };
+      els.loopPanel.textContent = JSON.stringify(summary, null, 2);
     }
 
     function renderHistory(history) {
@@ -543,10 +667,13 @@
         els.agentStateSummary.textContent = 'Load or create a PageAgent to inspect its current status.';
         renderProposal(null);
         renderHistory([]);
+        renderStep(null);
+        renderApply(null);
+        renderLoop(null);
         return;
       }
       els.agentStateId.value = currentAgent.agentId || '';
-      els.agentStateSummary.textContent = `Status: ${currentAgent.status || 'unknown'} | Environment: ${currentAgent.environment || '-'} | Tab: ${currentAgent.tabId || '-'} | History: ${currentAgent.historyCount || 0}`;
+      els.agentStateSummary.textContent = `Status: ${currentAgent.status || 'unknown'} | Environment: ${currentAgent.environment || '-'} | Tab: ${currentAgent.tabId || '-'} | History: ${currentAgent.historyCount || 0} | Last tool: ${currentAgent.lastTool || '-'}`;
       renderProposal(currentAgent.lastProposal);
       renderHistory(currentAgent.history);
       if (currentAgent.agentId) {
@@ -622,6 +749,30 @@
       setStatus(`Running ${name}`);
       const result = unwrapToolResult(await callTool(name, args));
       appendOutput(name, result);
+      if (name === 'browser_run_page_agent_step' && result?.stepResult) {
+        lastStepResult = result.stepResult;
+        renderStep(lastStepResult);
+      }
+      if (name === 'browser_apply_page_agent_proposal' && result?.applyResult) {
+        lastApplyResult = result.applyResult;
+        renderApply(lastApplyResult);
+      }
+      if (name === 'browser_run_page_agent_loop') {
+        lastLoopResult = result;
+        renderLoop(lastLoopResult);
+        if (Array.isArray(result.steps)) {
+          const latestStep = [...result.steps].reverse().find(item => item.phase === 'step');
+          const latestApply = [...result.steps].reverse().find(item => item.phase === 'apply');
+          if (latestStep?.data?.stepResult) {
+            lastStepResult = latestStep.data.stepResult;
+            renderStep(lastStepResult);
+          }
+          if (latestApply?.data?.applyResult) {
+            lastApplyResult = latestApply.data.applyResult;
+            renderApply(lastApplyResult);
+          }
+        }
+      }
       if (result && result.agent && typeof result.agent === 'object') {
         updateAgentPanels(result.agent);
       } else if (name === 'browser_get_page_agent' && result && result.agentId) {
@@ -741,6 +892,12 @@
       }
     });
 
+    els.agentScenario.addEventListener('change', () => {
+      if (els.agentScenario.value.trim()) {
+        els.agentGoal.value = els.agentScenario.value;
+      }
+    });
+
     document.getElementById('list-agent-btn').addEventListener('click', async () => {
       try {
         await runNamedTool('browser_list_page_agents', {
@@ -803,8 +960,10 @@
           agentId: els.manageAgentId.value.trim(),
           maxSteps: Number(els.loopMaxSteps.value || 3),
           maxErrors: Number(els.loopMaxErrors.value || 1),
-          maxChars: 2000,
+          maxChars: Number(els.loopMaxChars.value || 2000),
           requireAI: els.loopRequireAI.value === 'true',
+          stopOnRepeatedProposal: els.loopStopRepeat.value === 'true',
+          stopOnNoPageChange: els.loopStopNoChange.value === 'true',
           stopWhenText: els.loopStopText.value.trim() || undefined,
           stopOnTool: els.loopStopTool.value.trim() || undefined,
         });

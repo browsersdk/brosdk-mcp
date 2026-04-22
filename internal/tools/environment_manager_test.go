@@ -123,3 +123,13 @@ func TestLoadEnvironmentLockedExportsPageRuntimeState(t *testing.T) {
 		t.Fatalf("expected aria ref meta to be exported from page runtime, got %#v ok=%v", meta, ok)
 	}
 }
+
+func TestNewManagedBrowserCommandIsNotContextBound(t *testing.T) {
+	cmd := newManagedBrowserCommand("cmd", []string{"/c", "exit", "0"})
+	if cmd == nil {
+		t.Fatal("expected managed browser command")
+	}
+	if cmd.Cancel != nil {
+		t.Fatal("expected managed browser command to avoid request-bound cancellation")
+	}
+}

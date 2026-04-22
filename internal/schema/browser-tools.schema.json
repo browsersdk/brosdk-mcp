@@ -141,6 +141,16 @@
                                                                                "default":  false,
                                                                                "description":  "When true, stop if a proposal falls back to rules instead of AI."
                                                                            },
+                                                             "stopOnRepeatedProposal":  {
+                                                                                           "type":  "boolean",
+                                                                                           "default":  false,
+                                                                                           "description":  "Stop the loop when the same proposal repeats without making progress."
+                                                                                       },
+                                                             "stopOnNoPageChange":  {
+                                                                                        "type":  "boolean",
+                                                                                        "default":  false,
+                                                                                        "description":  "Stop the loop when the page observations do not change after an applied action."
+                                                                                    },
                                                              "stopWhenText":  {
                                                                                     "type":  "string",
                                                                                     "description":  "Stop the loop when page text or post-action text contains this substring."

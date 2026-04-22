@@ -615,6 +615,13 @@ func (e *Executor) callCloseEnvironment(ctx context.Context, args map[string]any
 	return map[string]any{"ok": true, "closed": env.Name, "activeEnvironment": nextActive}, nil
 }
 
+func newManagedBrowserCommand(chromePath string, args []string) *exec.Cmd {
+	cmd := exec.Command(chromePath, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd
+}
+
 func startChromeWithDynamicDebugPort(ctx context.Context, chromePath string, userDataDir string, initialURL string, headless bool) (*exec.Cmd, int, error) {
 	args := []string{
 		"--disable-gpu",
@@ -628,9 +635,9 @@ func startChromeWithDynamicDebugPort(ctx context.Context, chromePath string, use
 	}
 	args = append(args, initialURL)
 
-	cmd := exec.CommandContext(ctx, chromePath, args...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// Keep the managed browser process alive after the HTTP/tool request completes.
+	// We only use ctx to bound startup waiting, not as the browser process lifetime.
+	cmd := newManagedBrowserCommand(chromePath, args)
 
 	if err := cmd.Start(); err != nil {
 		return nil, 0, err
