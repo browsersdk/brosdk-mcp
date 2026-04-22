@@ -246,6 +246,40 @@
       font-size: 13px;
       color: var(--ink);
     }
+    .detail-card.alert {
+      border-color: rgba(178, 64, 64, 0.45);
+      background: rgba(178, 64, 64, 0.08);
+    }
+    .detail-card.ok {
+      border-color: rgba(29, 107, 87, 0.35);
+      background: rgba(29, 107, 87, 0.06);
+    }
+    .loop-steps {
+      display: grid;
+      gap: 10px;
+    }
+    .loop-step {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .loop-step summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .loop-step summary::-webkit-details-marker {
+      display: none;
+    }
+    .loop-step .mini {
+      margin: 0 12px 12px;
+    }
     .mini {
       margin-top: 8px;
       padding: 10px;
@@ -479,17 +513,23 @@
         <h2>Execution Details</h2>
         <div class="hint">Inspect step output, apply verification, and loop stop reasons here while testing PageAgent flows.</div>
         <div class="detail-grid">
-          <div class="detail-card">
+          <div class="detail-card" id="step-card">
             <strong>Last Step</strong>
             <div class="mini" id="step-panel">No step result yet.</div>
           </div>
-          <div class="detail-card">
+          <div class="detail-card" id="apply-card">
             <strong>Last Apply</strong>
             <div class="mini" id="apply-panel">No apply result yet.</div>
           </div>
-          <div class="detail-card">
+          <div class="detail-card" id="loop-card">
             <strong>Last Loop</strong>
             <div class="mini" id="loop-panel">No loop result yet.</div>
+          </div>
+        </div>
+        <div style="margin-top:14px;">
+          <strong style="display:block; margin-bottom:8px; font-size:13px;">Loop Step Trace</strong>
+          <div class="loop-steps" id="loop-steps-panel">
+            <div class="history-summary">No loop trace yet. Run a PageAgent loop to inspect step-by-step results.</div>
           </div>
         </div>
       </div>
@@ -540,9 +580,13 @@
       agentStateSummary: document.getElementById('agent-state-summary'),
       proposalPanel: document.getElementById('proposal-panel'),
       historyPanel: document.getElementById('history-panel'),
+      stepCard: document.getElementById('step-card'),
+      applyCard: document.getElementById('apply-card'),
+      loopCard: document.getElementById('loop-card'),
       stepPanel: document.getElementById('step-panel'),
       applyPanel: document.getElementById('apply-panel'),
       loopPanel: document.getElementById('loop-panel'),
+      loopStepsPanel: document.getElementById('loop-steps-panel'),
     };
 
     const uiConfigEndpoint = `${location.origin}/ui/config`;
@@ -594,6 +638,7 @@
     function renderStep(stepResult) {
       if (!stepResult || typeof stepResult !== 'object') {
         els.stepPanel.textContent = 'No step result yet.';
+        els.stepCard.classList.remove('alert', 'ok');
         return;
       }
       const summary = {
@@ -603,13 +648,17 @@
         textPreview: stepResult.text ? String(stepResult.text).slice(0, 220) : '',
       };
       els.stepPanel.textContent = JSON.stringify(summary, null, 2);
+      els.stepCard.classList.remove('alert');
+      els.stepCard.classList.add('ok');
     }
 
     function renderApply(applyResult) {
       if (!applyResult || typeof applyResult !== 'object') {
         els.applyPanel.textContent = 'No apply result yet.';
+        els.applyCard.classList.remove('alert', 'ok');
         return;
       }
+      const verificationOk = applyResult.verification?.ok !== false;
       const summary = {
         tool: applyResult.tool || null,
         verification: applyResult.verification || null,
@@ -618,13 +667,18 @@
         postActionTextPreview: applyResult.postActionText ? String(applyResult.postActionText).slice(0, 220) : '',
       };
       els.applyPanel.textContent = JSON.stringify(summary, null, 2);
+      els.applyCard.classList.toggle('alert', !verificationOk);
+      els.applyCard.classList.toggle('ok', verificationOk);
     }
 
     function renderLoop(loopResult) {
       if (!loopResult || typeof loopResult !== 'object') {
         els.loopPanel.textContent = 'No loop result yet.';
+        els.loopCard.classList.remove('alert', 'ok');
+        els.loopStepsPanel.innerHTML = '<div class="history-summary">No loop trace yet. Run a PageAgent loop to inspect step-by-step results.</div>';
         return;
       }
+      const healthyStop = !['verification_failed', 'max_errors_reached'].includes(loopResult.stopReason);
       const summary = {
         stopReason: loopResult.stopReason || null,
         errorCount: loopResult.errorCount ?? null,
@@ -634,6 +688,32 @@
         stepsRecorded: Array.isArray(loopResult.steps) ? loopResult.steps.length : 0,
       };
       els.loopPanel.textContent = JSON.stringify(summary, null, 2);
+      els.loopCard.classList.toggle('alert', !healthyStop);
+      els.loopCard.classList.toggle('ok', healthyStop);
+      renderLoopSteps(loopResult.steps);
+    }
+
+    function renderLoopSteps(steps) {
+      if (!Array.isArray(steps) || steps.length === 0) {
+        els.loopStepsPanel.innerHTML = '<div class="history-summary">No loop trace yet. Run a PageAgent loop to inspect step-by-step results.</div>';
+        return;
+      }
+      els.loopStepsPanel.innerHTML = steps.map((item, index) => {
+        const phase = item?.phase || 'unknown';
+        const data = item?.data || {};
+        const title = `#${index + 1} ${phase}`;
+        const previewSource = data.stepResult || data.applyResult || data;
+        const preview = JSON.stringify(previewSource, null, 2);
+        return `
+          <details class="loop-step" ${index === steps.length - 1 ? 'open' : ''}>
+            <summary>
+              <span>${title}</span>
+              <span>${phase === 'apply_error' || phase === 'step_error' ? 'error' : 'ok'}</span>
+            </summary>
+            <div class="mini">${preview}</div>
+          </details>
+        `;
+      }).join('');
     }
 
     function renderHistory(history) {
