@@ -38,6 +38,21 @@ func TestValidateAIProposal(t *testing.T) {
 	if err := validateAIProposal(invalid); err == nil {
 		t.Fatal("expected missing ref validation error")
 	}
+
+	validSelect := map[string]any{
+		"type":              "tool",
+		"intent":            "act",
+		"tool":              "browser_select_option_by_ref",
+		"arguments":         map[string]any{"ref": "e5", "label": "Beta"},
+		"reason":            "select the requested option",
+		"confidence":        "high",
+		"expectedOutcome":   "The dropdown shows Beta as the selected value.",
+		"needsVerification": true,
+		"verificationHints": map[string]any{"valueVisible": "Beta"},
+	}
+	if err := validateAIProposal(validSelect); err != nil {
+		t.Fatalf("expected valid select proposal, got %v", err)
+	}
 }
 
 func TestGenerateAIProposalLive(t *testing.T) {

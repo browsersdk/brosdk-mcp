@@ -132,6 +132,8 @@ The first version is intended for PageAgent and tool testing:
 - create, list, inspect, and remove page agents
 - run arbitrary MCP tools without manually writing JSON-RPC requests
 - configure `OPENAI_API_KEY`, `baseUrl`, and `model` for AI-powered PageAgent proposals
+- tune controlled loop inputs such as `maxSteps`, `maxErrors`, `requireAI`, `stopWhenText`, `stopOnTool`, `stopOnRepeatedProposal`, and `stopOnNoPageChange`
+- inspect proposal source, apply verification, loop stop reason, and per-step loop trace in dedicated PageAgent panels
 
 The UI is intentionally split into two layers:
 
@@ -290,7 +292,18 @@ Typical user-facing PageAgent scenarios:
      - test fixtures
      - repeated QA verification steps
 
-3. Page inspection before interaction
+3. Dropdown selection on ref-rich pages
+   - Goal: `select "Japan" in the country field`
+   - Likely flow:
+     - `browser_create_page_agent`
+     - `browser_run_page_agent_step`
+     - proposal: `browser_select_option_by_ref`
+     - `browser_apply_page_agent_proposal`
+   - Best for:
+     - native `select`/combobox flows
+     - fixture and form automation where the option label is visible in the goal
+
+4. Page inspection before interaction
    - Goal: `inspect the checkout page and stop once the text "Payment Details" is visible`
    - Likely flow:
      - `browser_create_page_agent`
@@ -299,7 +312,7 @@ Typical user-facing PageAgent scenarios:
      - waiting for a page state before acting
      - lightweight smoke checks
 
-4. Human-in-the-loop action proposals
+5. Human-in-the-loop action proposals
    - Goal: `click the Apply button`
    - Likely flow:
      - `browser_create_page_agent`
@@ -335,8 +348,10 @@ Current status:
 - PageAgent proposals can now be applied in a controlled way
 - Click-oriented proposals can now target concrete refs from the page snapshot
 - Input-oriented proposals can now target concrete textbox refs and progress through simple login/search flows
-- A controlled `browser_run_page_agent_loop` is now available for multi-step testing, including `maxSteps`, `maxErrors`, `requireAI`, `stopWhenText`, and `stopOnTool`
-- PageAgent E2E coverage now exercises the controlled planning/apply path for both rule-engine proposals and the env-gated AI flow
+- Selection-oriented proposals can now target `combobox` and `listbox` refs and prefer `browser_select_option_by_ref` when the goal asks to `select`, `choose`, or `pick`
+- A controlled `browser_run_page_agent_loop` is now available for multi-step testing, including `maxSteps`, `maxErrors`, `requireAI`, `stopWhenText`, `stopOnTool`, `stopOnRepeatedProposal`, and `stopOnNoPageChange`
+- The SSE UI now exposes the loop stop controls and dedicated proposal/apply/loop trace panels for PageAgent debugging
+- PageAgent E2E coverage now exercises the controlled planning/apply path for both rule-engine proposals and the env-gated AI flow, including AI-driven `select` proposals
 - PageAgent E2E coverage now validates controlled loop stop conditions such as `stopWhenText`, `stopOnTool`, and `ai_required_but_unavailable`
 - Autonomous loops are not implemented yet
 - The next major refinement is improving proposal quality beyond simple ref-targeted form flows, especially for richer multi-step page understanding and broader autonomous behavior
