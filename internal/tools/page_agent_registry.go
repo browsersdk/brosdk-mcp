@@ -707,6 +707,63 @@ func findTextboxCandidate(goal string, candidates []snapshotRefCandidate) *snaps
 	return nil
 }
 
+func findSelectCandidate(goal string, candidates []snapshotRefCandidate) *snapshotRefCandidate {
+	tokens := proposalGoalTokens(goal)
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	scoreCandidate := func(candidate snapshotRefCandidate) int {
+		role := strings.ToLower(candidate.Role)
+		if role != "combobox" && role != "listbox" {
+			return -1
+		}
+		name := strings.ToLower(candidate.Name)
+		score := 1
+		for _, token := range tokens {
+			if strings.Contains(name, token) {
+				score += 3
+			}
+		}
+		if strings.Contains(strings.ToLower(goal), "country") && strings.Contains(name, "country") {
+			score += 4
+		}
+		if strings.Contains(strings.ToLower(goal), "region") && strings.Contains(name, "region") {
+			score += 4
+		}
+		if strings.Contains(strings.ToLower(goal), "state") && strings.Contains(name, "state") {
+			score += 4
+		}
+		return score
+	}
+
+	var best *snapshotRefCandidate
+	bestScore := 0
+	for _, candidate := range candidates {
+		score := scoreCandidate(candidate)
+		if score <= 0 {
+			continue
+		}
+		c := candidate
+		if best == nil || score > bestScore {
+			best = &c
+			bestScore = score
+		}
+	}
+	if best != nil {
+		return best
+	}
+
+	for _, candidate := range candidates {
+		role := strings.ToLower(candidate.Role)
+		if role == "combobox" || role == "listbox" {
+			c := candidate
+			return &c
+		}
+	}
+	return nil
+}
+
 func extractFieldValue(goal string, field string) string {
 	pattern := pageAgentFieldValuePatterns[field]
 	if pattern == nil {
@@ -905,6 +962,38 @@ func extractInputText(goal string) string {
 	return ""
 }
 
+func extractSelectLabel(goal string) string {
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		return ""
+	}
+	if matches := quotedValuePattern.FindStringSubmatch(goal); len(matches) >= 3 {
+		if strings.TrimSpace(matches[1]) != "" {
+			return strings.TrimSpace(matches[1])
+		}
+		if strings.TrimSpace(matches[2]) != "" {
+			return strings.TrimSpace(matches[2])
+		}
+	}
+
+	lower := strings.ToLower(goal)
+	prefixes := []string{
+		"select ",
+		"choose ",
+		"pick ",
+	}
+	for _, prefix := range prefixes {
+		if idx := strings.Index(lower, prefix); idx >= 0 {
+			value := strings.TrimSpace(goal[idx+len(prefix):])
+			value = strings.Trim(value, `"'.,:;!?`)
+			if value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
 func proposeNextActionFromContext(goal string, text string, snapshot string, lastTool string, lastArgs map[string]any) map[string]any {
 	normalizedGoal := strings.ToLower(strings.TrimSpace(goal))
 	normalizedText := strings.TrimSpace(text)
@@ -1016,6 +1105,29 @@ func proposeNextActionFromContext(goal string, text string, snapshot string, las
 			}
 			return buildProposal(
 				"browser_type_by_ref",
+				args,
+				reason,
+				"medium",
+				map[string]any{
+					"ref":  candidate.Ref,
+					"role": candidate.Role,
+					"name": candidate.Name,
+				},
+			)
+		}
+	}
+
+	if strings.Contains(normalizedGoal, "select") || strings.Contains(normalizedGoal, "choose") || strings.Contains(normalizedGoal, "pick ") {
+		if candidate := findSelectCandidate(goal, candidates); candidate != nil {
+			label := extractSelectLabel(goal)
+			args := map[string]any{"ref": candidate.Ref}
+			reason := fmt.Sprintf("The goal suggests choosing an option and the snapshot contains a likely %s target named %q.", candidate.Role, candidate.Name)
+			if label != "" {
+				args["label"] = label
+				reason = fmt.Sprintf("The goal suggests choosing %q and the snapshot contains a likely %s target named %q.", label, candidate.Role, candidate.Name)
+			}
+			return buildProposal(
+				"browser_select_option_by_ref",
 				args,
 				reason,
 				"medium",

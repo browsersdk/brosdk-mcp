@@ -126,6 +126,7 @@ var allowedAIProposalTools = map[string]struct{}{
 	"browser_aria_snapshot": {},
 	"browser_click_by_ref":  {},
 	"browser_type_by_ref":   {},
+	"browser_select_option_by_ref": {},
 	"browser_screenshot":    {},
 	"browser_wait_for_load": {},
 }
@@ -201,6 +202,21 @@ func validateAIProposal(proposal map[string]any) error {
 		if strings.TrimSpace(ref) == "" {
 			return fmt.Errorf("browser_type_by_ref proposal missing ref")
 		}
+	case "browser_select_option_by_ref":
+		ref, _ := args["ref"].(string)
+		if strings.TrimSpace(ref) == "" {
+			return fmt.Errorf("browser_select_option_by_ref proposal missing ref")
+		}
+		if _, hasLabel := args["label"]; hasLabel {
+			return nil
+		}
+		if _, hasValue := args["value"]; hasValue {
+			return nil
+		}
+		if _, hasIndex := args["index"]; hasIndex {
+			return nil
+		}
+		return fmt.Errorf("browser_select_option_by_ref proposal missing label, value, or index")
 	}
 	return nil
 }
@@ -234,6 +250,7 @@ Choose the best next browser MCP tool from this allowlist only:
 - browser_aria_snapshot
 - browser_click_by_ref
 - browser_type_by_ref
+- browser_select_option_by_ref
 - browser_screenshot
 - browser_wait_for_load
 
@@ -241,6 +258,7 @@ Rules:
 - Prefer concrete ref-based actions when the snapshot contains a suitable ref.
 - Only use browser_click_by_ref when you have a ref.
 - Only use browser_type_by_ref when you have a ref, and include "text" when the goal clearly specifies what to enter.
+- Only use browser_select_option_by_ref when you have a ref, and include one of label, value, or index.
 - If the page needs more context, prefer browser_aria_snapshot or browser_get_text.
 - If the page seems not ready, prefer browser_wait_for_load.
 - Return JSON with keys: type, intent, tool, arguments, reason, confidence, expectedOutcome, needsVerification, verificationHints.

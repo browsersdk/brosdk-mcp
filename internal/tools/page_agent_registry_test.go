@@ -284,6 +284,25 @@ func TestExtractInputText(t *testing.T) {
 	}
 }
 
+func TestProposeNextActionUsesSelectRefForChooseGoal(t *testing.T) {
+	snapshot := strings.Join([]string{
+		`- document "Checkout"`,
+		`  - combobox "Country" [ref=e5]`,
+		`  - button "Continue" [ref=e6]`,
+	}, "\n")
+	proposal := proposeNextAction(`select "Japan" in the country field`, "page text", snapshot)
+	if proposal["tool"] != "browser_select_option_by_ref" {
+		t.Fatalf("expected browser_select_option_by_ref proposal, got %#v", proposal)
+	}
+	args, _ := proposal["arguments"].(map[string]any)
+	if args["ref"] != "e5" {
+		t.Fatalf("expected ref e5, got %#v", proposal)
+	}
+	if args["label"] != "Japan" {
+		t.Fatalf("expected label Japan, got %#v", proposal)
+	}
+}
+
 func TestProposalSignature(t *testing.T) {
 	proposal := map[string]any{
 		"type":              "tool",
