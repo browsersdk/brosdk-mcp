@@ -1,0 +1,4 @@
+interface:
+  display_name: "BroSDK"
+  short_description: "Wrap BroSDK as safe OpenAI and Claude tools"
+  default_prompt: "Use $brosdk to design or update a safe OpenAI/Claude tool wrapper for OrbitBridge BroSDK."
