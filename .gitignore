@@ -1,0 +1,14 @@
+# Build output
+/build/
+/bin/
+/out/
+/.vs/
+
+# CMake and IDE local state
+CMakeUserPresets.json
+*.user
+*.vcxproj.user
+
+# Logs and transient files
+*.log
+*.tmp

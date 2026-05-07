@@ -2,6 +2,31 @@ cmake_minimum_required(VERSION 3.16)
 
 project(bromcp LANGUAGES C CXX)
 
+set(BROMCP_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
+if(NOT DEFINED xs3RDPARTY_DIR)
+  set(xs3RDPARTY_DIR
+      "${BROMCP_REPO_ROOT}/third_party"
+      CACHE PATH "Vendored third-party dependency root")
+endif()
+if(NOT DEFINED xsBIN_DIR)
+  set(xsBIN_DIR
+      "${BROMCP_REPO_ROOT}/bin"
+      CACHE PATH "Runtime output root")
+endif()
+
+set(BROSDK_INCLUDE_DIR
+    "${BROMCP_REPO_ROOT}/brosdk/interface"
+    CACHE PATH "BroSDK public header directory")
+set(RAPIDJSON_INCLUDE_DIR
+    "${xs3RDPARTY_DIR}/rapidjson/include"
+    CACHE PATH "RapidJSON include directory")
+set(WEBSOCKETPP_INCLUDE_DIR
+    "${xs3RDPARTY_DIR}/websocketpp"
+    CACHE PATH "websocketpp include directory")
+set(ASIO_INCLUDE_DIR
+    "${xs3RDPARTY_DIR}/asio/include"
+    CACHE PATH "standalone Asio include directory")
+
 set(BROMCP_HEADERS
     include/bromcp/brosdk_client.h
     include/bromcp/dlfcn_compat.h
@@ -74,10 +99,10 @@ target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_20)
 target_include_directories(
   ${PROJECT_NAME}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
-          ${CMAKE_CURRENT_SOURCE_DIR}/../brosdk/interface
-          ${xs3RDPARTY_DIR}/rapidjson/include
-          ${xs3RDPARTY_DIR}/websocketpp
-          ${xs3RDPARTY_DIR}/asio/include
+          ${BROSDK_INCLUDE_DIR}
+          ${RAPIDJSON_INCLUDE_DIR}
+          ${WEBSOCKETPP_INCLUDE_DIR}
+          ${ASIO_INCLUDE_DIR}
           ${BROMCP_WIN32_DLFCN_INCLUDE_DIR})
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE ASIO_STANDALONE

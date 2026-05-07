@@ -8,8 +8,10 @@ BroSDK MCP + Skills 是一个面向 AI Agent 的 BroSDK 适配层。它把 BroSD
 
 ```text
 brosdk-mcp/
-  bromcp/    C++ MCP / JSON-RPC 适配器
-  skills/    BroSDK Agent Skill 与参考文档
+  bromcp/       C++ MCP / JSON-RPC 适配器
+  brosdk/       BroSDK public header
+  skills/       BroSDK Agent Skill 与参考文档
+  third_party/  RapidJSON、websocketpp、standalone Asio
 ```
 
 ## 项目状态
@@ -19,7 +21,7 @@ brosdk-mcp/
 - `bromcp` 已实现 stdio MCP 与 WebSocket JSON-RPC 两种传输方式。
 - `bromcp` 通过动态库加载 BroSDK，不把 BroSDK runtime 静态打包进 MCP 适配器。
 - `skills/` 提供 BroSDK 的安全调用规则、工具面设计、OpenAI / Claude 接入参考。
-- README 中的构建方式按当前源码结构说明；如果你要把它做成完全独立的开源包，建议补充 CI、License、Release packaging 和第三方依赖获取脚本。
+- 仓库已内置编译所需的 public header 和第三方头文件依赖，可作为独立源码包直接配置构建。
 
 ## 功能概览
 
@@ -65,45 +67,34 @@ brosdk-mcp/
 
 - CMake 3.16+
 - C++20 编译器
-- RapidJSON
-- websocketpp + standalone Asio
-- Windows 下需要 `dlfcn-win32` 或等效 `dlopen` 兼容层
-- BroSDK public header：`brosdk.h`
-- BroSDK runtime：`brosdk.dll` / `brosdk.so` / `brosdk.dylib`
+- RapidJSON：已放在 `third_party/rapidjson`
+- websocketpp：已放在 `third_party/websocketpp`
+- standalone Asio：已放在 `third_party/asio`
+- BroSDK public header：已放在 `brosdk/interface/brosdk.h`
+- BroSDK runtime：运行时通过 `--brosdk` 或 `BROSDK_LIBRARY` 指定
 
-当前 `bromcp/CMakeLists.txt` 是从 OrbitBridge 工程拆出的实现，默认依赖上层工程变量：
-
-- `xs3RDPARTY_DIR`
-- `xsBIN_DIR`
-- BroSDK 头文件路径：`../brosdk/interface`
-
-### 在 OrbitBridge 工程中构建
-
-如果你把 `bromcp` 放在 OrbitBridge 工程中，推荐直接构建目标：
+### 从仓库根目录构建
 
 ```powershell
-cmake --build out --target bromcp --config Release
+cmake -S . -B build
+cmake --build build --config Release
 ```
 
 生成后运行：
 
 ```powershell
-.\bin\Release\bromcp.exe --help
+.\build\bin\Release\bromcp.exe --help
 ```
 
-### 独立仓库构建
-
-如果你要把本仓库独立开源，请确保目录或 CMake 配置能找到 BroSDK 头文件和第三方依赖。例如：
+如需改用系统或外部依赖路径，可以覆盖这些 CMake 变量：
 
 ```powershell
-cmake -S bromcp -B build/bromcp `
-  -Dxs3RDPARTY_DIR=D:/path/to/3rdparty `
-  -DxsBIN_DIR=D:/work/brosdk-mcp/bin
-
-cmake --build build/bromcp --config Release
+cmake -S . -B build `
+  -DBROSDK_INCLUDE_DIR=D:/path/to/brosdk/interface `
+  -DRAPIDJSON_INCLUDE_DIR=D:/path/to/rapidjson/include `
+  -DWEBSOCKETPP_INCLUDE_DIR=D:/path/to/websocketpp `
+  -DASIO_INCLUDE_DIR=D:/path/to/asio/include
 ```
-
-独立开源时建议把 CMake 改造成显式变量，例如 `BROSDK_INCLUDE_DIR`、`RAPIDJSON_INCLUDE_DIR`、`WEBSOCKETPP_INCLUDE_DIR`、`ASIO_INCLUDE_DIR`，这样用户不需要了解 OrbitBridge 的内部变量名。
 
 ## 运行
 
@@ -269,8 +260,10 @@ Repository layout:
 
 ```text
 brosdk-mcp/
-  bromcp/    C++ MCP / JSON-RPC adapter
-  skills/    BroSDK Agent Skill and reference material
+  bromcp/       C++ MCP / JSON-RPC adapter
+  brosdk/       BroSDK public header
+  skills/       BroSDK Agent Skill and reference material
+  third_party/  RapidJSON, websocketpp, standalone Asio
 ```
 
 ## Status
@@ -280,7 +273,7 @@ This repository is suitable as an open-source preview or integration starting po
 - `bromcp` supports both stdio MCP and WebSocket JSON-RPC transports.
 - `bromcp` loads the BroSDK runtime dynamically.
 - `skills/` documents safe BroSDK usage, tool design, and OpenAI / Claude integration notes.
-- The current CMake file comes from the OrbitBridge tree. For a fully standalone open-source package, consider adding CI, a license, release packaging, and explicit dependency discovery variables.
+- The repository vendors the public header and header-only third-party dependencies needed for standalone builds.
 
 ## Features
 
@@ -324,43 +317,34 @@ For untrusted or multi-user deployments, add authentication, quotas, audit logs,
 
 - CMake 3.16+
 - A C++20 compiler
-- RapidJSON
-- websocketpp + standalone Asio
-- `dlfcn-win32` or an equivalent `dlopen` compatibility layer on Windows
-- BroSDK public header: `brosdk.h`
-- BroSDK runtime: `brosdk.dll`, `brosdk.so`, or `brosdk.dylib`
+- RapidJSON: vendored in `third_party/rapidjson`
+- websocketpp: vendored in `third_party/websocketpp`
+- standalone Asio: vendored in `third_party/asio`
+- BroSDK public header: vendored in `brosdk/interface/brosdk.h`
+- BroSDK runtime: provide it at runtime with `--brosdk` or `BROSDK_LIBRARY`
 
-The current `bromcp/CMakeLists.txt` expects OrbitBridge-style variables and paths:
-
-- `xs3RDPARTY_DIR`
-- `xsBIN_DIR`
-- BroSDK headers at `../brosdk/interface`
-
-### Build Inside OrbitBridge
+### Build From The Repository Root
 
 ```powershell
-cmake --build out --target bromcp --config Release
+cmake -S . -B build
+cmake --build build --config Release
 ```
 
 Then:
 
 ```powershell
-.\bin\Release\bromcp.exe --help
+.\build\bin\Release\bromcp.exe --help
 ```
 
-### Standalone Build
-
-For a standalone checkout, make sure the BroSDK headers and third-party dependencies are discoverable:
+To use system or external dependency paths, override these CMake variables:
 
 ```powershell
-cmake -S bromcp -B build/bromcp `
-  -Dxs3RDPARTY_DIR=D:/path/to/3rdparty `
-  -DxsBIN_DIR=D:/work/brosdk-mcp/bin
-
-cmake --build build/bromcp --config Release
+cmake -S . -B build `
+  -DBROSDK_INCLUDE_DIR=D:/path/to/brosdk/interface `
+  -DRAPIDJSON_INCLUDE_DIR=D:/path/to/rapidjson/include `
+  -DWEBSOCKETPP_INCLUDE_DIR=D:/path/to/websocketpp `
+  -DASIO_INCLUDE_DIR=D:/path/to/asio/include
 ```
-
-For a polished open-source release, consider replacing those internal variable names with explicit options such as `BROSDK_INCLUDE_DIR`, `RAPIDJSON_INCLUDE_DIR`, `WEBSOCKETPP_INCLUDE_DIR`, and `ASIO_INCLUDE_DIR`.
 
 ## Run
 
